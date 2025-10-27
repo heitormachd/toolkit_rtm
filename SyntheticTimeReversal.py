@@ -26,6 +26,20 @@ class SyntheticTimeReversal(SimulationConfig):
 
         self.bscan = np.load(f'{self.acou_sim_folder}/microphones_recording.npy')
 
+        # print(f'bscan shape: {self.bscan.shape}')
+
+        # plt.figure()
+        # plt.plot(self.bscan[0,:])
+        # plt.plot(self.bscan[-1, :])
+        # plt.show()
+
+        self.bscan[:, :1000] = np.float32(0)
+        
+        # plt.figure()
+        # plt.plot(self.bscan[0,:])
+        # plt.plot(self.bscan[-1, :])
+        # plt.show()
+        
         self.microphone_z = simulation_config['microphone_z']
         self.microphone_x = simulation_config['microphone_x']
         self.microphones_amount = simulation_config['microphones_amount']

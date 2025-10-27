@@ -2,20 +2,63 @@ import numpy as np
 import matplotlib.pyplot as plt
 import ffmpeg
 from matplotlib.image import imread
+import subprocess
 
 
 def plot_accumulated_product():
+
+    c, _, _ = convert_image_to_matrix('./map.png') 
+    reflector_z, reflector_x = np.int32(np.where(c == 0))
+
     accumulated_product = np.load('./SyntheticRTM/accumulated_product_0.npy')
-    for i in range(1, 39):
+    for i in range(1, 4):
         accumulated_product += np.load(f'./SyntheticRTM/accumulated_product_{i}.npy')
 
-    plt.figure()
-    plt.imshow(accumulated_product, aspect='auto')
-    plt.colorbar()
-    plt.grid()
-    plt.title('Accumulated Product - RTM')
-    plt.show()
+    accumulated_product_poynting = np.load('./SyntheticRTM/accumulated_product_poynting0.npy')
+    for i in range(1, 4):
+        accumulated_product_poynting += np.load(f'./SyntheticRTM/accumulated_product_poynting{i}.npy')
 
+    L = 45 
+  
+    grid_size_z, grid_size_x = c.shape 
+
+    in_roi = (reflector_x >= L) & (reflector_x < (grid_size_x - L)) & \
+             (reflector_z < (grid_size_z - L))
+    
+    roi_reflector_x = reflector_x[in_roi] - L 
+    roi_reflector_z = reflector_z[in_roi]
+
+    fig, axs = plt.subplots(1, 2, figsize=(16, 9), dpi=300, layout='tight')
+
+    abs_standard = np.abs(accumulated_product)
+    vmax_standard = np.percentile(abs_standard, 100)
+    vmin_standard = np.percentile(abs_standard, 95)
+
+    im0 = axs[0].imshow(abs_standard, aspect='auto', vmax=vmax_standard, vmin=vmin_standard)
+    axs[0].set_title('Accumulated Product (Standard RTM)')
+    axs[0].grid()
+    fig.colorbar(im0, ax=axs[0], orientation='vertical', shrink=0.8)
+    axs[0].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
+    abs_poynting = np.abs(accumulated_product_poynting)
+    vmax_poynting = np.percentile(abs_poynting, 100)
+    vmin_poynting = np.percentile(abs_poynting, 95)
+    
+    im1 = axs[1].imshow(abs_poynting, aspect='auto', vmax=vmax_poynting, vmin=vmin_poynting)
+    axs[1].set_title('Accumulated Product (Poynting RTM)')
+    axs[1].grid()
+    fig.colorbar(im1, ax=axs[1], orientation='vertical', shrink=0.8)
+    axs[1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
+
+    plt.savefig('rtm_comparison.png')
+    plt.show()
+    
+def plot_source():
+
+    source = np.load('source.npy')
+
+    plt.figure()
+    plt.plot(source)
+    plt.show()
 
 def plot_l2_norm():
     l2_norm = np.load('./TimeReversal/l2_norm.npy')
@@ -27,16 +70,30 @@ def plot_l2_norm():
     plt.colorbar()
     plt.grid()
     plt.title('L2-Norm - Time Reversal')
-    plt.show()
 
 
 def save_image(image, path):
+    # Ensure width is even for ffmpeg/libx264
+    h, w = image.shape[:2]
+    if w % 2 != 0:
+        # Crop last column
+        image = image[:, :-1]
     plt.imsave(path, image)
 
 
 def create_video(path, output_path):
-    ffmpeg.input(fr'{path}/frame_%d.png', framerate=25).output(output_path).run()
-
+    cmd = [
+        'ffmpeg',
+        '-y',
+        '-framerate', '25',
+        '-i', f'{path}/frame_%d.png',
+        # Add the video filter here to ensure even dimensions
+        '-vf', 'crop=trunc(iw/2)*2:trunc(ih/2)*2', 
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        output_path
+    ]
+    subprocess.run(cmd, check=True)
 
 def save_rtm_image(upper_left, upper_right, bottom_left, bottom_right, path):
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))

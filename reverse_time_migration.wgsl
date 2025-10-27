@@ -114,6 +114,21 @@ var<storage,read> is_z_absorption_flipped_tr: array<i32>;
 @group(0) @binding(33)
 var<storage,read> is_x_absorption_flipped_tr: array<i32>;
 
+@group(0) @binding(34)
+var<storage,read_write> v_z_present: array<f32>;
+
+@group(0) @binding(35)
+var<storage,read_write> v_x_present: array<f32>;
+
+@group(0) @binding(36)
+var<storage,read_write> v_z_present_flipped_tr: array<f32>;
+
+@group(0) @binding(37)
+var<storage,read_write> v_x_present_flipped_tr: array<f32>;
+
+@group(0) @binding(38)
+var<storage,read_write> rtm_poynting_image: array<f32>;
+
 // 2D index to 1D index
 fn zx(z: i32, x: i32) -> i32 {
     let index = x + z * infoI32.grid_size_x;
@@ -244,6 +259,51 @@ fn sim(@builtin(global_invocation_id) index: vec3<u32>) {
 
     p_past[zx(z, x)] = p_present[zx(z, x)];
     p_present[zx(z, x)] = p_future[zx(z, x)];
+}
+
+@compute
+@workgroup_size(wsz, wsx)
+fn update_velocity(@builtin(global_invocation_id) index: vec3<u32>) {
+    let z: i32 = i32(index.x);
+    let x: i32 = i32(index.y);
+    let idx = zx(z, x);
+
+    if (idx == -1) { return; }
+
+    v_z_present[idx] = v_z_present[idx] - infoF32.dt * dp_1_z[idx];
+    v_x_present[idx] = v_x_present[idx] - infoF32.dt * dp_1_x[idx];
+
+    v_z_present_flipped_tr[idx] = v_z_present_flipped_tr[idx] - infoF32.dt * dp_1_z_flipped_tr[idx];
+    v_x_present_flipped_tr[idx] = v_x_present_flipped_tr[idx] - infoF32.dt * dp_1_x_flipped_tr[idx];
+}
+
+@compute
+@workgroup_size(wsz, wsx)
+fn update_rtm_image(@builtin(global_invocation_id) index: vec3<u32>) {
+    let z: i32 = i32(index.x);
+    let x: i32 = i32(index.y);
+    let idx = zx(z, x);
+
+    if (idx == -1) { return; }
+
+    let pd = p_present[idx];
+
+    let vdz = v_z_present[idx];
+
+    let pu = p_present_flipped_tr[idx];
+
+    let vuz = v_z_present_flipped_tr[idx];
+
+    let sdz = -pd * vdz;
+    let suz = -pu * vuz; 
+
+    let pdpu = pd * pu;
+
+    var ic = 0.0;
+    if (sdz > 0.0 && suz < 0.0) {
+        ic = 1.0;
+    }
+    rtm_poynting_image[idx] = rtm_poynting_image[idx] + (pdpu * ic);
 }
 
 @compute

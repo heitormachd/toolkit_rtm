@@ -57,6 +57,14 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         self.is_z_absorption_int_flipped_tr = self.is_z_absorption_int.copy()
         self.is_x_absorption_int_flipped_tr = self.is_x_absorption_int.copy()
 
+        self.v_z_present = np.zeros(self.grid_size_shape, dtype=np.float32)
+        self.v_x_present = np.zeros(self.grid_size_shape, dtype=np.float32)
+
+        self.v_z_present_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
+        self.v_x_present_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
+
+        self.rtm_poynting_image = np.zeros(self.grid_size_shape, dtype=np.float32)
+
         # WebGPU buffer
         self.info_i32 = np.array(
             [
@@ -123,6 +131,11 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             'absorption_x_flipped_tr': self.absorption_x_flipped_tr,
             'is_z_absorption_flipped_tr': self.is_z_absorption_int_flipped_tr,
             'is_x_absorption_flipped_tr': self.is_x_absorption_int_flipped_tr,
+            'v_z_present': self.v_z_present,
+            'v_x_present': self.v_x_present,
+            'v_z_present_flipped_tr': self.v_z_present_flipped_tr,
+            'v_x_present_flipped_tr': self.v_x_present_flipped_tr,
+            'rtm_poynting_image': self.rtm_poynting_image,
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
@@ -134,7 +147,10 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         compute_after_backward = self.wgpu_handler.create_compute_pipeline("after_backward")
         compute_sim_flipped_tr = self.wgpu_handler.create_compute_pipeline("sim_flipped_tr")
         compute_sim = self.wgpu_handler.create_compute_pipeline("sim")
+        compute_update_velocity = self.wgpu_handler.create_compute_pipeline("update_velocity")
+        compute_update_rtm_image = self.wgpu_handler.create_compute_pipeline("update_rtm_image")
         compute_incr_time = self.wgpu_handler.create_compute_pipeline("incr_time")
+
 
         accumulated_product = np.zeros(self.grid_size_shape, dtype=np.float32)
 
@@ -152,7 +168,11 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             compute_pass.set_pipeline(compute_after_forward)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
-
+            
+            compute_pass.set_pipeline(compute_update_velocity)
+            compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
+                                             self.grid_size_x // self.wgpu_handler.ws[1])
+            
             compute_pass.set_pipeline(compute_backward_diff)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
@@ -168,7 +188,11 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             compute_pass.set_pipeline(compute_sim)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
-
+            
+            compute_pass.set_pipeline(compute_update_rtm_image)
+            compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
+                                             self.grid_size_x // self.wgpu_handler.ws[1])
+            
             compute_pass.set_pipeline(compute_incr_time)
             compute_pass.dispatch_workgroups(1)
 
@@ -180,30 +204,39 @@ class SyntheticReverseTimeMigration(SimulationConfig):
                              .reshape(self.grid_size_shape))
             self.p_future_flipped_tr = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b19']).cast("f"))
                              .reshape(self.grid_size_shape))
-
+            accumulated_product_poynting = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b38']).cast("f"))
+                                 .reshape(self.grid_size_shape))
+            
             current_product = self.p_future * self.p_future_flipped_tr
             accumulated_product += current_product
 
+            L = self.absorption_layer_size
+            roi_slice = (slice(None, -L), slice(L, -L))
+
+            in_roi = (self.reflector_x >= L) & (self.reflector_x < (self.grid_size_x - L)) & \
+                         (self.reflector_z < (self.grid_size_z - L))
+            
+            roi_reflector_x = self.reflector_x[in_roi] - L 
+            roi_reflector_z = self.reflector_z[in_roi]
+
+            
             if generate_video and i % animation_step == 0:
                 fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 
-                # Upper left subplot
                 axs[0, 0].imshow(self.p_future_flipped_tr, cmap='viridis', interpolation='none')
                 axs[0, 0].set_title('Up-Going')
-
-                # Upper right subplot
-                axs[0, 1].imshow(current_product, cmap='viridis', interpolation='none')
-                axs[0, 1].set_title('Product')
-
-                # Bottom left subplot
                 axs[1, 0].imshow(self.p_future, cmap='viridis', interpolation='none')
                 axs[1, 0].set_title('Down-Going')
 
-                # Bottom right subplot
-                axs[1, 1].imshow(accumulated_product, cmap='viridis', interpolation='none')
-                axs[1, 1].set_title('Accumulated Product')
-                axs[1, 1].scatter(self.reflector_x, self.reflector_z, s=0.05, color='red')
+                axs[0, 1].imshow(accumulated_product[roi_slice], cmap='viridis', interpolation='none')
+                axs[0, 1].set_title('Accumulated Standard Product')
 
+                axs[1, 1].imshow(accumulated_product_poynting[roi_slice], cmap='viridis', interpolation='none')
+                axs[1, 1].set_title('Accumulated Poynting Product')
+
+                axs[1, 1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='red')
+
+                # axs[1, 1].scatter(self.reflector_x, self.reflector_z, s=0.05, color='red')
                 plt.savefig(f'{self.frames_folder}/frame_{i // animation_step}.png', bbox_inches='tight', pad_inches=0)
                 plt.close()
 
@@ -221,7 +254,8 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         print('Reverse Time Migration finished.')
 
         # Save last frame of accumulated_product
-        np.save(f'{self.folder}/accumulated_product_{self.emitter_index}.npy', accumulated_product)
+        np.save(f'{self.folder}/accumulated_product_{self.emitter_index}.npy', accumulated_product[roi_slice])
+        np.save(f'{self.folder}/accumulated_product_poynting_{self.emitter_index}.npy', accumulated_product_poynting[roi_slice])
 
         if generate_video:
             create_video(path=self.frames_folder, output_path=f'{self.folder}/rtm.mp4')

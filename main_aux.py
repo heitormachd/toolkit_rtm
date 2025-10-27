@@ -1,3 +1,3 @@
-from functions import plot_l2_norm
+import functions as func
 
-plot_l2_norm()
+func.plot_accumulated_product()

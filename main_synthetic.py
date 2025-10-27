@@ -14,7 +14,7 @@ grid_size_z = np.int32(len(c[:, 0]))
 grid_size_x = np.int32(len(c[0, :]))
 grid_size_shape = (grid_size_z, grid_size_x)
 
-dt = np.float32(5e-7)
+dt = np.float32(3e-7)
 
 # Spatial steps (m/px)
 dz = np.float32(1.5e-3)
@@ -28,7 +28,7 @@ for mic in range(microphones_amount):
         'dx': dx,
         'grid_size_z': grid_size_z,
         'grid_size_x': grid_size_x,
-        'total_time': np.int32(9000),
+        'total_time': np.int32(4700),
         'medium_c': np.float32(1500),
     }
 
@@ -45,11 +45,18 @@ for mic in range(microphones_amount):
 
     print(f'Microfone {mic}/{microphones_amount - 1}')
 
-    acou_sim = SyntheticAcouSim(**simulation_config)
-    acou_sim.run(generate_video=False, animation_step=15)
+    if mic == 0:
+        # acou_sim = SyntheticAcouSim(**simulation_config)
+        # acou_sim.run(generate_video=True, animation_step=15)
+        # tr_sim = SyntheticTimeReversal(**simulation_config)
+        # tr_sim.run(generate_video=True, animation_step=15)
+        rtm_sim = SyntheticReverseTimeMigration(**simulation_config)
+        rtm_sim.run(generate_video=True, animation_step=15)
+    else:
+        acou_sim = SyntheticAcouSim(**simulation_config)
+        acou_sim.run(generate_video=False, animation_step=15)
+        tr_sim = SyntheticTimeReversal(**simulation_config)
+        tr_sim.run(generate_video=False, animation_step=15)
+        rtm_sim = SyntheticReverseTimeMigration(**simulation_config)
+        rtm_sim.run(generate_video=False, animation_step=15)        
 
-    tr_sim = SyntheticTimeReversal(**simulation_config)
-    tr_sim.run(generate_video=False, animation_step=15)
-
-    rtm_sim = SyntheticReverseTimeMigration(**simulation_config)
-    rtm_sim.run(generate_video=False, animation_step=15)

@@ -32,16 +32,14 @@ class SimulationConfig:
         self.dp_1_x = np.zeros(self.grid_size_shape, dtype=np.float32)
         self.dp_2_z = np.zeros(self.grid_size_shape, dtype=np.float32)
         self.dp_2_x = np.zeros(self.grid_size_shape, dtype=np.float32)
+        
 
         """ CPML """
-        # self.absorption_layer_size = np.int32(25)
-        self.absorption_layer_size = np.int32(25)
-        self.damping_coefficient = np.float32(3e6)
+        self.absorption_layer_size = np.int32(45)
+        self.damping_coefficient = np.float32(3e8)
 
         x, z = np.meshgrid(np.arange(self.grid_size_x, dtype=np.float32), np.arange(self.grid_size_z, dtype=np.float32))
 
-        # Choose absorbing boundaries
-        # self.is_z_absorption = np.array([False for _ in range(int(self.grid_size_z * self.grid_size_x))]).reshape(self.grid_size_shape)
         self.is_z_absorption = (z > self.grid_size_z - self.absorption_layer_size)
         self.is_x_absorption = (x > self.grid_size_x - self.absorption_layer_size) | (x < self.absorption_layer_size)
 
