@@ -231,8 +231,8 @@ class SyntheticReverseTimeMigration(SimulationConfig):
                 axs[0, 1].imshow(accumulated_product[roi_slice], cmap='viridis', interpolation='none')
                 axs[0, 1].set_title('Accumulated Standard Product')
 
-                axs[1, 1].imshow(accumulated_product_poynting[roi_slice], cmap='viridis', interpolation='none')
-                axs[1, 1].set_title('Accumulated Poynting Product')
+                axs[1, 1].imshow(current_product[roi_slice], cmap='viridis', interpolation='none')
+                axs[1, 1].set_title('Current Product')
 
                 axs[1, 1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='red')
 

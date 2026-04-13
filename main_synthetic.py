@@ -46,10 +46,10 @@ for mic in range(microphones_amount):
     print(f'Microfone {mic}/{microphones_amount - 1}')
 
     if mic == 0:
-        # acou_sim = SyntheticAcouSim(**simulation_config)
-        # acou_sim.run(generate_video=True, animation_step=15)
-        # tr_sim = SyntheticTimeReversal(**simulation_config)
-        # tr_sim.run(generate_video=True, animation_step=15)
+        acou_sim = SyntheticAcouSim(**simulation_config)
+        acou_sim.run(generate_video=True, animation_step=15)
+        tr_sim = SyntheticTimeReversal(**simulation_config)
+        tr_sim.run(generate_video=True, animation_step=15)
         rtm_sim = SyntheticReverseTimeMigration(**simulation_config)
         rtm_sim.run(generate_video=True, animation_step=15)
     else:

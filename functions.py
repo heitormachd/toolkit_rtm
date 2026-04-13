@@ -11,12 +11,12 @@ def plot_accumulated_product():
     reflector_z, reflector_x = np.int32(np.where(c == 0))
 
     accumulated_product = np.load('./SyntheticRTM/accumulated_product_0.npy')
-    for i in range(1, 4):
+    for i in range(1, 106):
         accumulated_product += np.load(f'./SyntheticRTM/accumulated_product_{i}.npy')
 
-    accumulated_product_poynting = np.load('./SyntheticRTM/accumulated_product_poynting0.npy')
-    for i in range(1, 4):
-        accumulated_product_poynting += np.load(f'./SyntheticRTM/accumulated_product_poynting{i}.npy')
+    # accumulated_product_poynting = np.load('./SyntheticRTM/accumulated_product_poynting_0.npy')
+    # for i in range(1, 8):
+    #     accumulated_product_poynting += np.load(f'./SyntheticRTM/accumulated_product_poynting_{i}.npy')
 
     L = 45 
   
@@ -28,28 +28,30 @@ def plot_accumulated_product():
     roi_reflector_x = reflector_x[in_roi] - L 
     roi_reflector_z = reflector_z[in_roi]
 
-    fig, axs = plt.subplots(1, 2, figsize=(16, 9), dpi=300, layout='tight')
+    # fig, axs = plt.subplots(1, 2, figsize=(16, 9), dpi=300, layout='tight')
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8), dpi=300, layout='tight')
 
     abs_standard = np.abs(accumulated_product)
     vmax_standard = np.percentile(abs_standard, 100)
-    vmin_standard = np.percentile(abs_standard, 95)
+    vmin_standard = np.percentile(abs_standard, 99.)
 
-    im0 = axs[0].imshow(abs_standard, aspect='auto', vmax=vmax_standard, vmin=vmin_standard)
-    axs[0].set_title('Accumulated Product (Standard RTM)')
-    axs[0].grid()
-    fig.colorbar(im0, ax=axs[0], orientation='vertical', shrink=0.8)
-    axs[0].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
-    abs_poynting = np.abs(accumulated_product_poynting)
-    vmax_poynting = np.percentile(abs_poynting, 100)
-    vmin_poynting = np.percentile(abs_poynting, 95)
+    im0 = ax.imshow(abs_standard, aspect='auto', vmax=vmax_standard, vmin=vmin_standard)
+    ax.set_title('Accumulated Product (Standard RTM)')
+    ax.grid()
+    fig.colorbar(im0, ax=ax, orientation='vertical', shrink=0.8)
+    ax.scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
+    # abs_poynting = np.abs(accumulated_product_poynting)
+    # vmax_poynting = np.percentile(abs_poynting, 100)
+    # vmin_poynting = np.percentile(abs_poynting, 80)
     
-    im1 = axs[1].imshow(abs_poynting, aspect='auto', vmax=vmax_poynting, vmin=vmin_poynting)
-    axs[1].set_title('Accumulated Product (Poynting RTM)')
-    axs[1].grid()
-    fig.colorbar(im1, ax=axs[1], orientation='vertical', shrink=0.8)
-    axs[1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
+    # im1 = axs[1].imshow(abs_poynting, aspect='auto', vmax=vmax_poynting, vmin=vmin_poynting)
+    # axs[1].set_title('Accumulated Product (Poynting RTM)')
+    # axs[1].grid()
+    # fig.colorbar(im1, ax=axs[1], orientation='vertical', shrink=0.8)
+    # axs[1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
 
-    plt.savefig('rtm_comparison.png')
+    plt.savefig('rtm.png')
     plt.show()
     
 def plot_source():
@@ -61,7 +63,7 @@ def plot_source():
     plt.show()
 
 def plot_l2_norm():
-    l2_norm = np.load('./TimeReversal/l2_norm.npy')
+    l2_norm = np.load('./SyntheticTR/l2_norm.npy')
 
     l2_norm[0:25, :] = np.float32(0)
 
@@ -70,6 +72,7 @@ def plot_l2_norm():
     plt.colorbar()
     plt.grid()
     plt.title('L2-Norm - Time Reversal')
+    plt.show()
 
 
 def save_image(image, path):
@@ -154,3 +157,8 @@ def convert_image_to_matrix(image_path):
     rgb_float = np.array(rgb_string, dtype=np.float32)
 
     return rgb_float, receptor_z, receptor_x
+
+if __name__ == "__main__":
+    plot_accumulated_product()
+    # plot_source()
+    # plot_l2_norm()
