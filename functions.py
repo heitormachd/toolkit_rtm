@@ -3,16 +3,21 @@ import matplotlib.pyplot as plt
 import ffmpeg
 from matplotlib.image import imread
 import subprocess
+from pathlib import Path
 
 
 def plot_accumulated_product():
 
-    c, _, _ = convert_image_to_matrix('./map.png') 
+    c, _, _, _, _ = convert_image_to_matrix('./map.png')
     reflector_z, reflector_x = np.int32(np.where(c == 0))
 
-    accumulated_product = np.load('./SyntheticRTM/accumulated_product_0.npy')
-    for i in range(1, 106):
-        accumulated_product += np.load(f'./SyntheticRTM/accumulated_product_{i}.npy')
+    accumulated_product_paths = sorted(Path('./SyntheticRTM').glob('accumulated_product_*.npy'))
+    if not accumulated_product_paths:
+        raise FileNotFoundError('No accumulated RTM images were found in ./SyntheticRTM.')
+
+    accumulated_product = np.load(accumulated_product_paths[0])
+    for accumulated_product_path in accumulated_product_paths[1:]:
+        accumulated_product += np.load(accumulated_product_path)
 
     # accumulated_product_poynting = np.load('./SyntheticRTM/accumulated_product_poynting_0.npy')
     # for i in range(1, 8):
@@ -54,6 +59,12 @@ def plot_accumulated_product():
     plt.savefig('rtm.png')
     plt.show()
     
+# def create_source():
+
+    # source = np.random.rand(1000)
+
+    # np.save('source.npy', source)
+
 def plot_source():
 
     source = np.load('source.npy')
@@ -65,10 +76,17 @@ def plot_source():
 def plot_l2_norm():
     l2_norm = np.load('./SyntheticTR/l2_norm.npy')
 
-    l2_norm[0:25, :] = np.float32(0)
+    l2_norm[0:10, :] = np.float32(0)
+
+    l2_norm_log = np.log10(l2_norm + 1e-10)  # Add a small constant to avoid log(0)
+
+    vmax = np.percentile(l2_norm_log, 99)
+    vmin = np.percentile(l2_norm_log, 80)
+
 
     plt.figure()
-    plt.imshow(l2_norm, aspect='auto')
+    plt.imshow(l2_norm_log, aspect='auto', vmax=vmax, vmin=vmin)
+
     plt.colorbar()
     plt.grid()
     plt.title('L2-Norm - Time Reversal')
@@ -122,43 +140,69 @@ def save_rtm_image(upper_left, upper_right, bottom_left, bottom_right, path):
 
 
 def convert_image_to_matrix(image_path):
-    rgb_raw_image = np.int32(imread(image_path))
+    rgb_raw_image = np.asarray(imread(image_path))
 
-    velocity_map = {
-        'white': 'receptors',
-        'black': '0',
-        'blue': '1500',
-        'green': '3200',
-        'red': '6400',
-    }
-    binary_color = {
-        7: 'white',
-        0: 'black',
-        1: 'red',
-        2: 'green',
-        4: 'blue',
-    }
+    if rgb_raw_image.ndim != 3 or rgb_raw_image.shape[2] < 3:
+        raise ValueError(f'Expected an RGB image at {image_path}, got shape {rgb_raw_image.shape}.')
 
-    rgb_2d_grid = np.zeros_like(rgb_raw_image[:, :, 0])
+    # Exact marker colors expected in the PNG editor:
+    # black   = #000000 -> reflector / obstacle
+    # blue    = #0000FF -> background medium (1500 m/s)
+    # green   = #00FF00 -> material (3200 m/s)
+    # red     = #FF0000 -> material (6400 m/s)
+    # yellow  = #FFFF00 -> source only
+    # cyan    = #00FFFF -> receptor only
+    # white   = #FFFFFF -> colocated source + receptor
+    rgb_image = rgb_raw_image[:, :, :3]
+    if np.issubdtype(rgb_image.dtype, np.floating):
+        rgb_image = np.rint(rgb_image * 255).astype(np.uint8)
+    else:
+        rgb_image = rgb_image.astype(np.uint8)
 
-    b = 1
-    for i in range(3):
-        b += i
-        rgb_2d_grid += rgb_raw_image[:, :, i] * b
+    red = rgb_image[:, :, 0] == 255
+    green = rgb_image[:, :, 1] == 255
+    blue = rgb_image[:, :, 2] == 255
 
-    rgb_string = np.array(rgb_2d_grid, dtype='str')
-    for k in binary_color.keys():
-        rgb_string[rgb_string == str(k)] = velocity_map[binary_color[k]]
+    is_black = ~red & ~green & ~blue
+    is_red = red & ~green & ~blue
+    is_green = ~red & green & ~blue
+    is_blue = ~red & ~green & blue
+    is_yellow = red & green & ~blue
+    is_cyan = ~red & green & blue
+    is_white = red & green & blue
 
-    receptor_pos = np.where(rgb_string == 'receptors')
-    rgb_string[receptor_pos] = '1500'
+    recognized_mask = is_black | is_red | is_green | is_blue | is_yellow | is_cyan | is_white
+    if not np.all(recognized_mask):
+        unknown_positions = np.argwhere(~recognized_mask)
+        first_unknown_z, first_unknown_x = unknown_positions[0]
+        first_unknown_rgb = rgb_image[first_unknown_z, first_unknown_x].tolist()
+        raise ValueError(
+            f'Unsupported color {first_unknown_rgb} at pixel ({first_unknown_z}, {first_unknown_x}) in {image_path}.'
+        )
+
+    rgb_float = np.full(rgb_image.shape[:2], np.float32(1500), dtype=np.float32)
+    rgb_float[is_black] = np.float32(0)
+    rgb_float[is_green] = np.float32(3200)
+    rgb_float[is_red] = np.float32(6400)
+
+    source_pos = np.where(is_yellow | is_white)
+    receptor_pos = np.where(is_cyan | is_white)
+
+    source_z, source_x = np.int32(source_pos)
     receptor_z, receptor_x = np.int32(receptor_pos)
 
-    rgb_float = np.array(rgb_string, dtype=np.float32)
+    if source_z.size == 0:
+        raise ValueError(
+            f'No sources found in {image_path}. Use yellow pixels for source-only markers or white for colocated source/receptor markers.'
+        )
+    if receptor_z.size == 0:
+        raise ValueError(
+            f'No receptors found in {image_path}. Use cyan pixels for receptor-only markers or white for colocated source/receptor markers.'
+        )
 
-    return rgb_float, receptor_z, receptor_x
+    return rgb_float, source_z, source_x, receptor_z, receptor_x
 
 if __name__ == "__main__":
-    plot_accumulated_product()
+    # plot_accumulated_product()
     # plot_source()
-    # plot_l2_norm()
+    plot_l2_norm()

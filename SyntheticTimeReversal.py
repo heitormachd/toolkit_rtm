@@ -33,7 +33,7 @@ class SyntheticTimeReversal(SimulationConfig):
         # plt.plot(self.bscan[-1, :])
         # plt.show()
 
-        self.bscan[:, :1000] = np.float32(0)
+        self.bscan[:, :200] = np.float32(0)
         
         # plt.figure()
         # plt.plot(self.bscan[0,:])

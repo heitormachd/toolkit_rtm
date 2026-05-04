@@ -35,8 +35,8 @@ class SimulationConfig:
         
 
         """ CPML """
-        self.absorption_layer_size = np.int32(45)
-        self.damping_coefficient = np.float32(3e8)
+        self.absorption_layer_size = np.int32(25)
+        self.damping_coefficient = np.float32(6e8)
 
         x, z = np.meshgrid(np.arange(self.grid_size_x, dtype=np.float32), np.arange(self.grid_size_z, dtype=np.float32))
 
@@ -55,7 +55,7 @@ class SimulationConfig:
         self.absorption_z = np.ones(self.grid_size_shape, dtype=np.float32)
         self.absorption_x = np.ones(self.grid_size_shape, dtype=np.float32)
 
-        # self.absorption_z[:self.absorption_layer_size, :] = self.absorption_coefficient[:, np.newaxis][::-1]  # z < layer_size
+        self.absorption_z[:self.absorption_layer_size, :] = self.absorption_coefficient[:, np.newaxis][::-1]  # z < layer_size
         self.absorption_z[-self.absorption_layer_size:, :] = self.absorption_coefficient[:, np.newaxis]  # z > (size_z - layer_size)
         self.absorption_x[:, :self.absorption_layer_size] = self.absorption_coefficient[::-1]  # x < layer_size
         self.absorption_x[:, -self.absorption_layer_size:] = self.absorption_coefficient  # x > (size_x - layer_size)

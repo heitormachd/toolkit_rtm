@@ -253,7 +253,7 @@ Utility functions for visualization and I/O.
 
 | Function                        | Description                                                                   |
 | ------------------------------- | ----------------------------------------------------------------------------- |
-| `convert_image_to_matrix(path)` | Parse color-coded velocity model PNG to numerical grid                        |
+| `convert_image_to_matrix(path)` | Parse color-coded velocity model PNG into velocity, source, and receptor grids |
 | `save_image(image, path)`       | Save image with even width (video codec compatibility)                        |
 | `create_video(path, output)`    | Generate MP4 from frame sequence via ffmpeg (H.264, 25 fps)                   |
 | `save_rtm_image(...)`           | Save 2x2 subplot (upgoing, product, downgoing, accumulated)                   |
@@ -375,9 +375,18 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 
 ```
 1. Load velocity model from map.png
-   └── convert_image_to_matrix() extracts velocity grid + microphone positions
+   └── convert_image_to_matrix() extracts velocity grid plus independent source and receptor positions
 
-2. For each microphone emitter (index 0..N):
+   PNG marker legend:
+   - `black` / `#000000` = reflector / obstacle (`c = 0`)
+   - `blue` / `#0000FF` = background medium (`c = 1500`)
+   - `green` / `#00FF00` = material (`c = 3200`)
+   - `red` / `#FF0000` = material (`c = 6400`)
+   - `yellow` / `#FFFF00` = source only (`c = 1500`)
+   - `cyan` / `#00FFFF` = receptor only (`c = 1500`)
+   - `white` / `#FFFFFF` = colocated source + receptor (`c = 1500`)
+
+2. For each source marker (index 0..N):
 
    a. Forward Simulation (SyntheticAcouSim)
       ├── Propagate source wavelet through velocity model on GPU
