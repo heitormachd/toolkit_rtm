@@ -328,11 +328,11 @@ Convolutional Perfectly Matched Layer (CPML) absorbs outgoing waves at domain bo
 
 **Parameters:**
 - Layer thickness: 45 pixels
-- Damping coefficient: $\gamma = 3 \times 10^8$
+- Damping coefficient: $\gamma = 2 \times 10^8$
 
-**Absorption coefficient** — quadratic profile over the layer:
+**Absorption coefficient** — cubic profile over the layer:
 
-$$\alpha = \exp\!\left(-\gamma \,\xi^2 \,\Delta t\right), \qquad \xi = \frac{d}{L} \in [0,\,1]$$
+$$\alpha = \exp\!\left(-\gamma \,\xi^3 \,\Delta t\right), \qquad \xi = \frac{d}{L} \in [0,\,1]$$
 
 where $d$ is the distance from the inner edge of the layer and $L$ is the layer thickness.
 
@@ -469,8 +469,9 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 | Parameter | Value |
 |-----------|-------|
 | `absorption_layer_size` | 45 pixels |
-| `damping_coefficient` | $\gamma = 3 \times 10^8$ |
-| Profile | Quadratic: $\left(\frac{d}{L}\right)^2$ |
+| `damping_coefficient` | $\gamma = 2 \times 10^8$ |
+| `cpml_profile_order` | 3 |
+| Profile | Cubic: $\left(\frac{d}{L}\right)^3$ |
 
 ### GPU Workgroup Sizes
 
