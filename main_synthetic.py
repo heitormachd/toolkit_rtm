@@ -34,7 +34,7 @@ for src in range(sources_amount):
         'dx': dx,
         'grid_size_z': grid_size_z,
         'grid_size_x': grid_size_x,
-        'total_time': np.int32(4000),
+        'total_time': np.int32(2230),
         'medium_c': np.float32(1500),
     }
 

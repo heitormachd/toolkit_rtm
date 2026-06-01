@@ -1,9 +1,28 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import ffmpeg
 from matplotlib.image import imread
 import subprocess
 from pathlib import Path
+
+
+def temporal_spatial_plot(recording_path='./SyntheticAcouSim/microphones_recording.npy', *, cmap='seismic', percentile=99.5):
+    recording = np.load(recording_path)
+    if recording.ndim != 2:
+        raise ValueError(f'Expected a 2D recording array at {recording_path}, got shape {recording.shape}.')
+
+    vmax = np.percentile(np.abs(recording), percentile)
+    if vmax == 0:
+        vmax = 1
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150, layout='tight')
+    im = ax.imshow(recording, aspect='auto', cmap=cmap, vmin=-vmax, vmax=vmax, interpolation='nearest')
+    ax.set_xlabel('Sample')
+    ax.set_ylabel('Channel')
+    ax.set_title(f'Temporal-Spatial Recording ({recording.shape[0]} channels x {recording.shape[1]} samples)')
+    fig.colorbar(im, ax=ax, orientation='vertical', shrink=0.9, label='Amplitude')
+    plt.show()
+
+    return fig, ax
 
 
 def plot_accumulated_product():
@@ -78,14 +97,12 @@ def plot_l2_norm():
 
     l2_norm[0:10, :] = np.float32(0)
 
-    l2_norm_log = np.log10(l2_norm + 1e-10)  # Add a small constant to avoid log(0)
+    # l2_norm_log = np.log10(l2_norm + 1e-10)  # Add a small constant to avoid log(0)
 
-    vmax = np.percentile(l2_norm_log, 99)
-    vmin = np.percentile(l2_norm_log, 80)
-
+    vmax = np.percentile(l2_norm, 60)
 
     plt.figure()
-    plt.imshow(l2_norm_log, aspect='auto', vmax=vmax, vmin=vmin)
+    plt.imshow(l2_norm, aspect='auto', vmax=vmax, vmin=0)
 
     plt.colorbar()
     plt.grid()
@@ -206,3 +223,4 @@ if __name__ == "__main__":
     # plot_accumulated_product()
     # plot_source()
     plot_l2_norm()
+    temporal_spatial_plot()

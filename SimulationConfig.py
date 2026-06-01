@@ -40,8 +40,8 @@ class SimulationConfig:
 
         x, z = np.meshgrid(np.arange(self.grid_size_x, dtype=np.float32), np.arange(self.grid_size_z, dtype=np.float32))
 
-        self.is_z_absorption = (z > self.grid_size_z - self.absorption_layer_size)
-        self.is_x_absorption = (x > self.grid_size_x - self.absorption_layer_size) | (x < self.absorption_layer_size)
+        self.is_z_absorption = (z < self.absorption_layer_size) | (z >= self.grid_size_z - self.absorption_layer_size)
+        self.is_x_absorption = (x < self.absorption_layer_size) | (x >= self.grid_size_x - self.absorption_layer_size)
 
         self.absorption_coefficient = np.exp(
             -(self.damping_coefficient * (np.arange(self.absorption_layer_size) / self.absorption_layer_size) ** 2) * self.dt

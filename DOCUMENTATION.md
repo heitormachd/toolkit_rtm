@@ -257,6 +257,7 @@ Utility functions for visualization and I/O.
 | `save_image(image, path)`       | Save image with even width (video codec compatibility)                        |
 | `create_video(path, output)`    | Generate MP4 from frame sequence via ffmpeg (H.264, 25 fps)                   |
 | `save_rtm_image(...)`           | Save 2x2 subplot (upgoing, product, downgoing, accumulated)                   |
+| `temporal_spatial_plot()`       | Visualize synthetic recordings as a samples x channels colormap               |
 | `plot_accumulated_product()`    | Post-processing: sum RTM images across emitters, compare standard vs Poynting |
 | `plot_source()`                 | Visualize source waveform                                                     |
 | `plot_l2_norm()`                | Visualize TR energy distribution                                              |
@@ -502,7 +503,7 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 
 | File | Content |
 |------|---------|
-| `microphones_recording.npy` | Synthetic B-scan (receivers x time) |
+| `microphones_recording.npy` | Synthetic B-scan stored as receivers x time; `temporal_spatial_plot()` displays it as samples x channels |
 | `last_frame.npy` | Final pressure field from time reversal |
 | `second_to_last_frame.npy` | Penultimate pressure field from TR |
 | `accumulated_product_{i}.npy` | Standard RTM image for emitter i |
