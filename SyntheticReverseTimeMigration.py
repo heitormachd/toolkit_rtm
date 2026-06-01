@@ -2,7 +2,7 @@ import os
 import numpy as np
 from SimulationConfig import SimulationConfig
 from WebGpuHandler import WebGpuHandler
-from functions import save_rtm_image, create_video
+from functions import save_rtm_image, create_video, load_sources
 import matplotlib.pyplot as plt
 
 
@@ -17,7 +17,7 @@ class SyntheticReverseTimeMigration(SimulationConfig):
 
         self.c[self.c == np.float32(0)] = simulation_config['medium_c']
 
-        self.emitter_index = simulation_config['emitter_index']
+        self.emitter_index = int(simulation_config.get('emitter_index', 0))
 
         # Create folders
         self.folder = './SyntheticRTM'
@@ -26,15 +26,19 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         self.tr_folder = './SyntheticTR'
 
         # Source
-        self.source = np.load('./source.npy').astype(np.float32)
-        if len(self.source) < self.total_time:
-            self.source = np.pad(self.source, (0, self.total_time - len(self.source)), 'constant').astype(np.float32)
-        elif len(self.source) > self.total_time:
-            self.source = self.source[:self.total_time]
+        self.source_ids = np.atleast_1d(
+            simulation_config.get('source_ids', simulation_config.get('source_id', 0))
+        ).astype(np.int32)
+        self.source = load_sources(self.source_ids, self.total_time)
+        self.source_time = np.int32(self.source.shape[1])
 
         # Source's position
-        self.source_z = simulation_config['source_z']
-        self.source_x = simulation_config['source_x']
+        self.source_z = np.atleast_1d(simulation_config['source_z']).astype(np.int32)
+        self.source_x = np.atleast_1d(simulation_config['source_x']).astype(np.int32)
+        self.sources_amount = np.int32(len(self.source_z))
+        if len(self.source_x) != self.sources_amount or len(self.source_ids) != self.sources_amount:
+            raise ValueError('source_z, source_x, and source_ids must have the same length.')
+        self.source_zx = np.ascontiguousarray(np.concatenate((self.source_z, self.source_x)).astype(np.int32))
 
         # Up-going pressure fields (Flipped Time Reversal)
         self.p_future_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
@@ -70,8 +74,8 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             [
                 self.grid_size_z,
                 self.grid_size_x,
-                self.source_z,
-                self.source_x,
+                self.sources_amount,
+                self.source_time,
                 0,
             ],
             dtype=np.int32
@@ -136,11 +140,17 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             'v_z_present_flipped_tr': self.v_z_present_flipped_tr,
             'v_x_present_flipped_tr': self.v_x_present_flipped_tr,
             'rtm_poynting_image': self.rtm_poynting_image,
+            'source_zx': self.source_zx,
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
 
     def run(self, generate_video: bool, animation_step: int):
+        if generate_video:
+            for frame_name in os.listdir(self.frames_folder):
+                if frame_name.startswith('frame_') and frame_name.endswith('.png'):
+                    os.remove(os.path.join(self.frames_folder, frame_name))
+
         compute_forward_diff = self.wgpu_handler.create_compute_pipeline("forward_diff")
         compute_after_forward = self.wgpu_handler.create_compute_pipeline("after_forward")
         compute_backward_diff = self.wgpu_handler.create_compute_pipeline("backward_diff")

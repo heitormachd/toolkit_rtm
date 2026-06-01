@@ -1,8 +1,8 @@
 struct InfoInt {
     grid_size_z: i32,
     grid_size_x: i32,
-    source_z: i32,
-    source_x: i32,
+    sources_amount: i32,
+    source_time: i32,
     i: i32,
 };
 
@@ -129,6 +129,9 @@ var<storage,read_write> v_x_present_flipped_tr: array<f32>;
 @group(0) @binding(38)
 var<storage,read_write> rtm_poynting_image: array<f32>;
 
+@group(0) @binding(39)
+var<storage,read> source_zx: array<i32>;
+
 // 2D index to 1D index
 fn zx(z: i32, x: i32) -> i32 {
     let index = x + z * infoI32.grid_size_x;
@@ -252,9 +255,14 @@ fn sim(@builtin(global_invocation_id) index: vec3<u32>) {
 
     p_future[zx(z, x)] += ((2. * p_present[zx(z, x)]) - p_past[zx(z, x)]);
 
-    if (z == infoI32.source_z && x == infoI32.source_x)
-    {
-        p_future[zx(z, x)] += source[infoI32.i];
+    for (var source_index: i32 = 0; source_index < infoI32.sources_amount; source_index = source_index + 1) {
+        let source_z = source_zx[source_index];
+        let source_x = source_zx[source_index + infoI32.sources_amount];
+
+        if (z == source_z && x == source_x)
+        {
+            p_future[zx(z, x)] += source[source_index * infoI32.source_time + infoI32.i];
+        }
     }
 
     p_past[zx(z, x)] = p_present[zx(z, x)];

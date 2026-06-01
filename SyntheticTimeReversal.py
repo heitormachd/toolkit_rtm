@@ -2,7 +2,7 @@ import numpy as np
 import os
 from SimulationConfig import SimulationConfig
 from WebGpuHandler import WebGpuHandler
-from functions import save_image, create_video
+from functions import save_image, create_video, load_sources
 import matplotlib.pyplot as plt
 
 
@@ -45,13 +45,12 @@ class SyntheticTimeReversal(SimulationConfig):
         self.microphone_z = simulation_config['microphone_z']
         self.microphone_x = simulation_config['microphone_x']
         self.microphones_amount = simulation_config['microphones_amount']
+        self.source_ids = np.atleast_1d(
+            simulation_config.get('source_ids', simulation_config.get('source_id', 0))
+        ).astype(np.int32)
 
-        source = np.load('./source.npy').astype(np.float32)
-        if len(source) < recorded_time:
-            source = np.pad(source, (0, recorded_time - len(source)), 'constant').astype(np.float32)
-        elif len(source) > recorded_time:
-            source = source[:recorded_time]
-        source_index = ~np.isclose(source, 0)
+        sources = load_sources(self.source_ids, recorded_time)
+        source_index = np.any(~np.isclose(sources, 0), axis=0)
         # Cut the recorded source
         self.bscan[:, source_index] = np.float32(0)
 
@@ -114,6 +113,11 @@ class SyntheticTimeReversal(SimulationConfig):
         self.wgpu_handler.create_buffers(wgsl_data)
 
     def run(self, generate_video: bool, animation_step: int):
+        if generate_video:
+            for frame_name in os.listdir(self.frames_folder):
+                if frame_name.startswith('frame_') and frame_name.endswith('.png'):
+                    os.remove(os.path.join(self.frames_folder, frame_name))
+
         compute_forward_diff = self.wgpu_handler.create_compute_pipeline("forward_diff")
         compute_after_forward = self.wgpu_handler.create_compute_pipeline("after_forward")
         compute_backward_diff = self.wgpu_handler.create_compute_pipeline("backward_diff")

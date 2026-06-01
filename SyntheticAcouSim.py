@@ -2,7 +2,7 @@ import numpy as np
 import os
 from SimulationConfig import SimulationConfig
 from WebGpuHandler import WebGpuHandler
-from functions import save_image, create_video
+from functions import save_image, create_video, load_sources
 import matplotlib.pyplot as plt
 
 
@@ -19,8 +19,14 @@ class SyntheticAcouSim(SimulationConfig):
         self.microphone_x = simulation_config['microphone_x']
         self.microphones_amount = simulation_config['microphones_amount']
 
-        self.source_z = simulation_config['source_z']
-        self.source_x = simulation_config['source_x']
+        self.source_z = np.atleast_1d(simulation_config['source_z']).astype(np.int32)
+        self.source_x = np.atleast_1d(simulation_config['source_x']).astype(np.int32)
+        self.source_ids = np.atleast_1d(
+            simulation_config.get('source_ids', simulation_config.get('source_id', 0))
+        ).astype(np.int32)
+        self.sources_amount = np.int32(len(self.source_z))
+        if len(self.source_x) != self.sources_amount or len(self.source_ids) != self.sources_amount:
+            raise ValueError('source_z, source_x, and source_ids must have the same length.')
 
         self.reflector_z, self.reflector_x = np.int32(np.where(self.c == 0))
         self.reflectors_amount = np.int32(len(self.reflector_z))
@@ -28,19 +34,17 @@ class SyntheticAcouSim(SimulationConfig):
         self.microphones_recording = np.array([[0 for _ in range(self.total_time)] for _ in range(self.microphones_amount)], dtype=np.float32)
 
         # Source
-        self.source = np.load('./source.npy').astype(np.float32)
-        if len(self.source) < self.total_time:
-            self.source = np.pad(self.source, (0, self.total_time - len(self.source)), 'constant').astype(np.float32)
-        elif len(self.source) > self.total_time:
-            self.source = self.source[:self.total_time]
+        self.source = load_sources(self.source_ids, self.total_time)
+        self.source_time = np.int32(self.source.shape[1])
+        self.source_zx = np.ascontiguousarray(np.concatenate((self.source_z, self.source_x)).astype(np.int32))
 
         # WebGPU buffer
         self.info_i32 = np.array(
             [
                 self.grid_size_z,
                 self.grid_size_x,
-                self.source_z,
-                self.source_x,
+                self.sources_amount,
+                self.source_time,
                 0,
             ],
             dtype=np.int32
@@ -85,11 +89,17 @@ class SyntheticAcouSim(SimulationConfig):
             'absorption_x': self.absorption_x,
             'is_z_absorption': self.is_z_absorption_int,
             'is_x_absorption': self.is_x_absorption_int,
+            'source_zx': self.source_zx,
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
 
     def run(self, generate_video: bool, animation_step: int):
+        if generate_video:
+            for frame_name in os.listdir(self.frames_folder):
+                if frame_name.startswith('frame_') and frame_name.endswith('.png'):
+                    os.remove(os.path.join(self.frames_folder, frame_name))
+
         compute_forward_diff = self.wgpu_handler.create_compute_pipeline("forward_diff")
         compute_after_forward = self.wgpu_handler.create_compute_pipeline("after_forward")
         compute_backward_diff = self.wgpu_handler.create_compute_pipeline("backward_diff")
@@ -141,9 +151,10 @@ class SyntheticAcouSim(SimulationConfig):
                 plt.imshow(self.p_future, cmap='bwr')
                 plt.colorbar()
                 plt.scatter(self.microphone_x, self.microphone_z, s=1, color='purple')
+                plt.scatter(self.source_x, self.source_z, s=20, color='yellow', edgecolors='black')
                 plt.scatter(self.reflector_x, self.reflector_z, s=0.05, color='green')
                 plt.grid(True)
-                plt.title(f'Synthetic Acoustic Sim - {i}')
+                plt.title(f'Synthetic Acoustic Sim - {self.sources_amount} sources - {i}')
                 plt.savefig(f'{self.frames_folder}/frame_{i // animation_step}.png')
                 plt.close()
 

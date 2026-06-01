@@ -79,7 +79,8 @@ acoustics_imaging_pv/
 │   └── signal_processing_functions.py     # FFT, filtering, windowing
 │
 ├── Data Files
-│   ├── source.npy                         # Pre-computed source waveform
+│   ├── source0.npy...source99.npy         # Per-source synthetic waveforms
+│   ├── source.npy                         # Legacy alias for source0.npy / real-data waveform
 │   └── map.png                            # Velocity model (color-coded)
 │
 ├── Output Directories (generated at runtime)
@@ -253,7 +254,9 @@ Utility functions for visualization and I/O.
 
 | Function                        | Description                                                                   |
 | ------------------------------- | ----------------------------------------------------------------------------- |
-| `convert_image_to_matrix(path)` | Parse color-coded velocity model PNG into velocity, source, and receptor grids |
+| `convert_image_to_matrix(path)` | Parse color-coded velocity model PNG into velocity, source, receptor, and optional source-ID grids |
+| `create_source(...)`            | Generate delayed `source0.npy`...`sourceN.npy` Gaussian source waveforms       |
+| `load_source(...)`              | Load, pad, or trim a selected source waveform                                  |
 | `save_image(image, path)`       | Save image with even width (video codec compatibility)                        |
 | `create_video(path, output)`    | Generate MP4 from frame sequence via ffmpeg (H.264, 25 fps)                   |
 | `save_rtm_image(...)`           | Save 2x2 subplot (upgoing, product, downgoing, accumulated)                   |
@@ -383,29 +386,30 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
    - `blue` / `#0000FF` = background medium (`c = 1500`)
    - `green` / `#00FF00` = material (`c = 3200`)
    - `red` / `#FF0000` = material (`c = 6400`)
-   - `yellow` / `#FFFF00` = source only (`c = 1500`)
+   - `source` / `#FFFF00`..`#FFFF99` = source only (`c = 1500`), decimal suffix selects `source0.npy`..`source99.npy`
    - `cyan` / `#00FFFF` = receptor only (`c = 1500`)
-   - `white` / `#FFFFFF` = colocated source + receptor (`c = 1500`)
+   - `white` / `#FFFFFF` = colocated source + receptor using source ID 0 (`c = 1500`)
 
-2. For each source marker (index 0..N):
+2. Run one combined multi-source simulation:
 
    a. Forward Simulation (SyntheticAcouSim)
-      ├── Propagate source wavelet through velocity model on GPU
+      ├── Load one waveform per source marker color
+      ├── Inject all source positions during the same GPU simulation
       ├── Record pressure at all receiver positions at each time step
       └── Save synthetic B-scan → microphones_recording.npy
 
    b. Time Reversal (SyntheticTimeReversal)
       ├── Flip B-scan in time
       ├── Replace reflector velocity (c=0) with medium velocity (1500 m/s)
-      ├── Suppress direct arrivals (blank first 1000 samples)
+      ├── Suppress direct arrivals using the union of all source waveforms
       ├── Back-propagate on GPU
       └── Save final frames → last_frame.npy, second_to_last_frame.npy
 
    c. RTM Imaging (SyntheticReverseTimeMigration)
-      ├── Propagate downgoing wavefield (source-driven)
+      ├── Propagate the combined multi-source downgoing wavefield
       ├── Load upgoing wavefield from TR frames
       ├── Accumulate standard + Poynting crosscorrelation products
-      └── Save → accumulated_product_{i}.npy, accumulated_product_poynting_{i}.npy
+      └── Save → accumulated_product_0.npy, accumulated_product_poynting_0.npy
 
 3. Post-processing (plot_accumulated_product)
    ├── Sum accumulated products across all emitters
@@ -487,14 +491,15 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 |--------|--------|-----------|
 | `.mat` (MATLAB) | Acude reservoir recordings | `InputTest.load_data_acude()` |
 | `.m2k` | Panther ultrasonic scanner (FMC) | `InputTest.load_data_panther()` |
-| `.npy` | Pre-computed source waveform | `np.load('source.npy')` |
+| `.npy` | Pre-computed source waveform | `functions.load_source(source_id, total_time)` |
 | `.png` | Color-coded velocity model | `functions.convert_image_to_matrix()` |
 
 ### Velocity Model Color Encoding (map.png)
 
 | Color | Velocity (m/s) | Meaning |
 |-------|----------------|---------|
-| White | 1500 | Receptor/microphone position |
+| Source colors `#FFFF00`..`#FFFF99` | 1500 | Source position; decimal suffix selects `source0.npy`..`source99.npy` |
+| White | 1500 | Colocated source ID 0 and receptor/microphone position |
 | Blue | 1500 | Water / reference medium |
 | Green | 3200 | Medium velocity material |
 | Red | 6400 | High velocity material |
@@ -504,11 +509,11 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 
 | File | Content |
 |------|---------|
-| `microphones_recording.npy` | Synthetic B-scan stored as receivers x time; `temporal_spatial_plot()` displays it as samples x channels |
+| `microphones_recording.npy` | Combined synthetic B-scan stored as receivers x time; `temporal_spatial_plot()` displays it as samples x channels |
 | `last_frame.npy` | Final pressure field from time reversal |
 | `second_to_last_frame.npy` | Penultimate pressure field from TR |
-| `accumulated_product_{i}.npy` | Standard RTM image for emitter i |
-| `accumulated_product_poynting_{i}.npy` | Poynting RTM image for emitter i |
+| `accumulated_product_0.npy` | Standard RTM image for the combined multi-source simulation |
+| `accumulated_product_poynting_0.npy` | Poynting RTM image for the combined multi-source simulation |
 | `l2_norm.npy` | L2-norm energy from time reversal |
 | `frames/*.png` | Animation frames (sequential) |
 | `*.mp4` | Simulation videos (H.264, 25 fps) |
@@ -557,7 +562,7 @@ python main_synthetic.py
 
 Requires:
 - `map.png` in the project root (color-coded velocity model)
-- `source.npy` in the project root (source waveform)
+- `source0.npy`...`source99.npy` in the project root as needed by source colors. `source.npy` is accepted as a compatibility alias for source ID 0.
 
 Produces output in `SyntheticAcouSim/`, `SyntheticTR/`, and `SyntheticRTM/` directories.
 

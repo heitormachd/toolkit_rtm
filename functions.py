@@ -78,19 +78,114 @@ def plot_accumulated_product():
     plt.savefig('rtm.png')
     plt.show()
     
-# def create_source():
+def create_source(
+    n_sources=1,
+    mu=30,
+    sigma=5,
+    samples=1000,
+    output_dir='.',
+    legacy_alias=True,
+    delay_between_sources=None,
+):
+    """Create Gaussian source waveforms with independent first center and spacing."""
+    n_sources = int(n_sources)
+    samples = int(samples)
+    output_dir = Path(output_dir)
+    if delay_between_sources is None:
+        delay_between_sources = mu
 
-    # source = np.random.rand(1000)
+    if n_sources < 1 or n_sources > 100:
+        raise ValueError('n_sources must be between 1 and 100.')
+    if samples < 1:
+        raise ValueError('samples must be at least 1.')
+    if sigma <= 0:
+        raise ValueError('sigma must be greater than 0.')
+    if delay_between_sources < 0:
+        raise ValueError('delay_between_sources must be greater than or equal to 0.')
 
-    # np.save('source.npy', source)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    x = np.arange(samples, dtype=np.float32)
+    source_paths = []
 
-def plot_source():
+    for source_id in range(n_sources):
+        center = np.float32(mu + delay_between_sources * source_id)
+        source = np.exp(-0.5 * ((x - center) / np.float32(sigma)) ** 2).astype(np.float32)
+        source_path = output_dir / f'source{source_id}.npy'
+        np.save(source_path, source)
+        source_paths.append(source_path)
 
-    source = np.load('source.npy')
+        if source_id == 0 and legacy_alias:
+            np.save(output_dir / 'source.npy', source)
 
-    plt.figure()
-    plt.plot(source)
+    return source_paths
+
+
+def load_source(source_id=0, total_time=None, source_dir='.'):
+    source_id = int(source_id)
+    source_dir = Path(source_dir)
+
+    if source_id < 0:
+        raise ValueError('source_id must be non-negative.')
+
+    expected_source_path = source_dir / f'source{source_id}.npy'
+    source_path = expected_source_path
+    if not source_path.exists() and source_id == 0:
+        source_path = source_dir / 'source.npy'
+
+    if not source_path.exists():
+        raise FileNotFoundError(
+            f'Could not find waveform for source {source_id}. Expected {expected_source_path}.'
+        )
+
+    source = np.load(source_path).astype(np.float32)
+    if total_time is None:
+        return source
+
+    total_time = int(total_time)
+    if len(source) < total_time:
+        return np.pad(source, (0, total_time - len(source)), 'constant').astype(np.float32)
+    if len(source) > total_time:
+        return source[:total_time].astype(np.float32)
+    return source
+
+
+def load_sources(source_ids, total_time, source_dir='.'):
+    source_ids = np.atleast_1d(source_ids).astype(np.int32)
+    if source_ids.size == 0:
+        raise ValueError('At least one source ID is required.')
+
+    sources = [load_source(int(source_id), total_time, source_dir) for source_id in source_ids]
+    return np.ascontiguousarray(np.vstack(sources).astype(np.float32))
+
+def plot_source(source_dir='.'):
+    source_dir = Path(source_dir)
+    source_paths = []
+
+    for source_path in source_dir.glob('source*.npy'):
+        source_suffix = source_path.stem.removeprefix('source')
+        if source_suffix.isdigit():
+            source_paths.append((int(source_suffix), source_path))
+
+    source_paths.sort(key=lambda item: item[0])
+
+    if not source_paths:
+        legacy_source_path = source_dir / 'source.npy'
+        if not legacy_source_path.exists():
+            raise FileNotFoundError(f'No source waveforms found in {source_dir}.')
+        source_paths = [(0, legacy_source_path)]
+
+    fig, ax = plt.subplots()
+    for source_id, source_path in source_paths:
+        source = np.load(source_path).astype(np.float32)
+        ax.plot(source, label=f'source{source_id}')
+
+    ax.set_xlabel('Sample')
+    ax.set_ylabel('Amplitude')
+    ax.set_title('Source Waveforms')
+    ax.legend()
     plt.show()
+
+    return fig, ax
 
 def plot_l2_norm():
     l2_norm = np.load('./SyntheticTR/l2_norm.npy')
@@ -156,18 +251,18 @@ def save_rtm_image(upper_left, upper_right, bottom_left, bottom_right, path):
     plt.close()
 
 
-def convert_image_to_matrix(image_path):
+def convert_image_to_matrix(image_path, return_source_ids=False):
     rgb_raw_image = np.asarray(imread(image_path))
 
     if rgb_raw_image.ndim != 3 or rgb_raw_image.shape[2] < 3:
         raise ValueError(f'Expected an RGB image at {image_path}, got shape {rgb_raw_image.shape}.')
 
-    # Exact marker colors expected in the PNG editor:
+    # Marker colors expected in the PNG editor:
     # black   = #000000 -> reflector / obstacle
     # blue    = #0000FF -> background medium (1500 m/s)
     # green   = #00FF00 -> material (3200 m/s)
     # red     = #FF0000 -> material (6400 m/s)
-    # yellow  = #FFFF00 -> source only
+    # source  = #FFFF00..#FFFF99 -> source only, decimal suffix selects sourceN.npy
     # cyan    = #00FFFF -> receptor only
     # white   = #FFFFFF -> colocated source + receptor
     rgb_image = rgb_raw_image[:, :, :3]
@@ -176,19 +271,40 @@ def convert_image_to_matrix(image_path):
     else:
         rgb_image = rgb_image.astype(np.uint8)
 
-    red = rgb_image[:, :, 0] == 255
-    green = rgb_image[:, :, 1] == 255
-    blue = rgb_image[:, :, 2] == 255
+    red = rgb_image[:, :, 0]
+    green = rgb_image[:, :, 1]
+    blue = rgb_image[:, :, 2]
 
-    is_black = ~red & ~green & ~blue
-    is_red = red & ~green & ~blue
-    is_green = ~red & green & ~blue
-    is_blue = ~red & ~green & blue
-    is_yellow = red & green & ~blue
-    is_cyan = ~red & green & blue
-    is_white = red & green & blue
+    is_black = (red == 0) & (green == 0) & (blue == 0)
+    is_red = (red == 255) & (green == 0) & (blue == 0)
+    is_green = (red == 0) & (green == 255) & (blue == 0)
+    is_blue = (red == 0) & (green == 0) & (blue == 255)
+    is_cyan = (red == 0) & (green == 255) & (blue == 255)
+    is_white = (red == 255) & (green == 255) & (blue == 255)
 
-    recognized_mask = is_black | is_red | is_green | is_blue | is_yellow | is_cyan | is_white
+    source_marker_tolerance = 3
+    source_candidate = (
+        (red >= 255 - source_marker_tolerance) &
+        (green >= 255 - source_marker_tolerance) &
+        ~is_white
+    )
+    source_id_tens = blue // 16
+    source_id_ones = blue % 16
+    has_decimal_source_suffix = (source_id_tens <= 9) & (source_id_ones <= 9)
+    is_source = source_candidate & has_decimal_source_suffix
+    invalid_source_suffix = source_candidate & ~has_decimal_source_suffix
+
+    if np.any(invalid_source_suffix):
+        invalid_positions = np.argwhere(invalid_source_suffix)
+        invalid_z, invalid_x = invalid_positions[0]
+        invalid_rgb = rgb_image[invalid_z, invalid_x].tolist()
+        invalid_hex = '#{:02X}{:02X}{:02X}'.format(*invalid_rgb)
+        raise ValueError(
+            f'Unsupported source color {invalid_hex} at pixel ({invalid_z}, {invalid_x}) in {image_path}. '
+            'Use decimal source colors #FFFF00 through #FFFF99.'
+        )
+
+    recognized_mask = is_black | is_red | is_green | is_blue | is_source | is_cyan | is_white
     if not np.all(recognized_mask):
         unknown_positions = np.argwhere(~recognized_mask)
         first_unknown_z, first_unknown_x = unknown_positions[0]
@@ -202,25 +318,32 @@ def convert_image_to_matrix(image_path):
     rgb_float[is_green] = np.float32(3200)
     rgb_float[is_red] = np.float32(6400)
 
-    source_pos = np.where(is_yellow | is_white)
+    source_pos = np.where(is_source | is_white)
     receptor_pos = np.where(is_cyan | is_white)
 
     source_z, source_x = np.int32(source_pos)
     receptor_z, receptor_x = np.int32(receptor_pos)
+    source_id_matrix = (source_id_tens.astype(np.int32) * 10) + source_id_ones.astype(np.int32)
+    source_ids = source_id_matrix[source_pos].astype(np.int32)
+    source_ids[is_white[source_pos]] = np.int32(0)
 
     if source_z.size == 0:
         raise ValueError(
-            f'No sources found in {image_path}. Use yellow pixels for source-only markers or white for colocated source/receptor markers.'
+            f'No sources found in {image_path}. Use #FFFF00 through #FFFF99 for source-only markers or white for colocated source/receptor markers.'
         )
     if receptor_z.size == 0:
         raise ValueError(
             f'No receptors found in {image_path}. Use cyan pixels for receptor-only markers or white for colocated source/receptor markers.'
         )
 
+    if return_source_ids:
+        return rgb_float, source_z, source_x, receptor_z, receptor_x, source_ids
+
     return rgb_float, source_z, source_x, receptor_z, receptor_x
 
 if __name__ == "__main__":
     # plot_accumulated_product()
-    # plot_source()
+    create_source(n_sources=3, samples=3500 , delay_between_sources=1000)
+    plot_source()
     plot_l2_norm()
     temporal_spatial_plot()
