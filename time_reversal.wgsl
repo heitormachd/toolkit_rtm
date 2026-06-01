@@ -3,6 +3,7 @@ struct InfoInt {
     grid_size_x: i32,
     microphones_amount: i32,
     i: i32,
+    samples_per_microphone: i32,
 };
 
 struct InfoFloat {
@@ -21,10 +22,7 @@ var<storage,read> infoF32: InfoFloat;
 var<storage,read> c: array<f32>;
 
 @group(0) @binding(3)
-var<storage,read> microphone_z: array<i32>;
-
-@group(0) @binding(4)
-var<storage,read> microphone_x: array<i32>;
+var<storage,read> microphone_zx: array<i32>;
 
 @group(0) @binding(5)
 var<storage,read_write> p_future: array<f32>;
@@ -36,48 +34,37 @@ var<storage,read_write> p_present: array<f32>;
 var<storage,read_write> p_past: array<f32>;
 
 @group(0) @binding(8)
-var<storage,read_write> dp_1_z: array<f32>;
-
-@group(0) @binding(9)
-var<storage,read_write> dp_1_x: array<f32>;
+var<storage,read_write> dp_1: array<f32>;
 
 @group(0) @binding(10)
-var<storage,read_write> dp_2_z: array<f32>;
-
-@group(0) @binding(11)
-var<storage,read_write> dp_2_x: array<f32>;
+var<storage,read_write> dp_2: array<f32>;
 
 @group(0) @binding(12)
-var<storage,read_write> psi_z: array<f32>;
-
-@group(0) @binding(13)
-var<storage,read_write> psi_x: array<f32>;
+var<storage,read_write> psi: array<f32>;
 
 @group(0) @binding(14)
-var<storage,read_write> phi_z: array<f32>;
-
-@group(0) @binding(15)
-var<storage,read_write> phi_x: array<f32>;
+var<storage,read_write> phi: array<f32>;
 
 @group(0) @binding(16)
-var<storage,read> absorption_z: array<f32>;
-
-@group(0) @binding(17)
-var<storage,read> absorption_x: array<f32>;
+var<storage,read> absorption: array<f32>;
 
 @group(0) @binding(18)
-var<storage,read> is_z_absorption: array<i32>;
+var<storage,read> is_absorption: array<i32>;
 
-@group(0) @binding(19)
-var<storage,read> is_x_absorption: array<i32>;
-
-//FLIPPED_MICROPHONES_BINDINGS
+@group(0) @binding(20)
+var<storage,read> flipped_bscan: array<f32>;
 
 // 2D index to 1D index
 fn zx(z: i32, x: i32) -> i32 {
-    let index = x + z * infoI32.grid_size_x;
+    return x + z * infoI32.grid_size_x;
+}
 
-    return select(-1, index, x >= 0 && x < infoI32.grid_size_x && z >= 0 && z < infoI32.grid_size_z);
+fn x_field_index(index: i32) -> i32 {
+    return (infoI32.grid_size_z * infoI32.grid_size_x) + index;
+}
+
+fn microphone_x_index(index: i32) -> i32 {
+    return infoI32.microphones_amount + index;
 }
 
 @compute
@@ -85,12 +72,13 @@ fn zx(z: i32, x: i32) -> i32 {
 fn forward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
+    let grid_index: i32 = zx(z, x);
 
     if (z + 1 < infoI32.grid_size_z) {
-        dp_1_z[zx(z, x)] = (p_present[zx(z + 1, x)] - p_present[zx(z, x)]) / infoF32.dz;
+        dp_1[grid_index] = (p_present[zx(z + 1, x)] - p_present[grid_index]) / infoF32.dz;
     }
     if (x + 1 < infoI32.grid_size_x) {
-        dp_1_x[zx(z, x)] = (p_present[zx(z, x + 1)] - p_present[zx(z, x)]) / infoF32.dx;
+        dp_1[x_field_index(grid_index)] = (p_present[zx(z, x + 1)] - p_present[grid_index]) / infoF32.dx;
     }
 }
 
@@ -99,12 +87,14 @@ fn forward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
 fn backward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
+    let grid_index: i32 = zx(z, x);
+    let x_grid_index: i32 = x_field_index(grid_index);
 
     if (z - 1 >= 0) {
-        dp_2_z[zx(z, x)] = (dp_1_z[zx(z, x)] - dp_1_z[zx(z - 1, x)]) / infoF32.dz;
+        dp_2[grid_index] = (dp_1[grid_index] - dp_1[zx(z - 1, x)]) / infoF32.dz;
     }
     if (x - 1 >= 0) {
-        dp_2_x[zx(z, x)] = (dp_1_x[zx(z, x)] - dp_1_x[zx(z, x - 1)]) / infoF32.dx;
+        dp_2[x_grid_index] = (dp_1[x_grid_index] - dp_1[x_field_index(zx(z, x - 1))]) / infoF32.dx;
     }
 }
 
@@ -113,14 +103,16 @@ fn backward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
 fn after_forward(@builtin(global_invocation_id) index: vec3<u32>) {
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
+    let grid_index: i32 = zx(z, x);
+    let x_grid_index: i32 = x_field_index(grid_index);
 
-    if (is_z_absorption[zx(z, x)] == 1) {
-        phi_z[zx(z, x)] = absorption_z[zx(z, x)] * phi_z[zx(z, x)] + (absorption_z[zx(z, x)] - 1) * dp_1_z[zx(z, x)];
-        dp_1_z[zx(z, x)] += phi_z[zx(z, x)];
+    if (is_absorption[grid_index] == 1) {
+        phi[grid_index] = absorption[grid_index] * phi[grid_index] + (absorption[grid_index] - 1) * dp_1[grid_index];
+        dp_1[grid_index] += phi[grid_index];
     }
-    if (is_x_absorption[zx(z, x)] == 1) {
-        phi_x[zx(z, x)] = absorption_x[zx(z, x)] * phi_x[zx(z, x)] + (absorption_x[zx(z, x)] - 1) * dp_1_x[zx(z, x)];
-        dp_1_x[zx(z, x)] += phi_x[zx(z, x)];
+    if (is_absorption[x_grid_index] == 1) {
+        phi[x_grid_index] = absorption[x_grid_index] * phi[x_grid_index] + (absorption[x_grid_index] - 1) * dp_1[x_grid_index];
+        dp_1[x_grid_index] += phi[x_grid_index];
     }
 }
 
@@ -129,14 +121,16 @@ fn after_forward(@builtin(global_invocation_id) index: vec3<u32>) {
 fn after_backward(@builtin(global_invocation_id) index: vec3<u32>) {
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
+    let grid_index: i32 = zx(z, x);
+    let x_grid_index: i32 = x_field_index(grid_index);
 
-    if (is_z_absorption[zx(z, x)] == 1) {
-        psi_z[zx(z, x)] = absorption_z[zx(z, x)] * psi_z[zx(z, x)] + (absorption_z[zx(z, x)] - 1) * dp_2_z[zx(z, x)];
-        dp_2_z[zx(z, x)] += psi_z[zx(z, x)];
+    if (is_absorption[grid_index] == 1) {
+        psi[grid_index] = absorption[grid_index] * psi[grid_index] + (absorption[grid_index] - 1) * dp_2[grid_index];
+        dp_2[grid_index] += psi[grid_index];
     }
-    if (is_x_absorption[zx(z, x)] == 1) {
-        psi_x[zx(z, x)] = absorption_x[zx(z, x)] * psi_x[zx(z, x)] + (absorption_x[zx(z, x)] - 1) * dp_2_x[zx(z, x)];
-        dp_2_x[zx(z, x)] += psi_x[zx(z, x)];
+    if (is_absorption[x_grid_index] == 1) {
+        psi[x_grid_index] = absorption[x_grid_index] * psi[x_grid_index] + (absorption[x_grid_index] - 1) * dp_2[x_grid_index];
+        dp_2[x_grid_index] += psi[x_grid_index];
     }
 }
 
@@ -145,21 +139,24 @@ fn after_backward(@builtin(global_invocation_id) index: vec3<u32>) {
 fn sim(@builtin(global_invocation_id) index: vec3<u32>) {
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
+    let grid_index: i32 = zx(z, x);
+    let x_grid_index: i32 = x_field_index(grid_index);
 
-    p_future[zx(z, x)] = (c[zx(z, x)] * c[zx(z, x)]) * (dp_2_z[zx(z, x)] + dp_2_x[zx(z, x)]) * (infoF32.dt * infoF32.dt);
+    p_future[grid_index] = (c[grid_index] * c[grid_index]) * (dp_2[grid_index] + dp_2[x_grid_index]) * (infoF32.dt * infoF32.dt);
 
-    p_future[zx(z, x)] += ((2. * p_present[zx(z, x)]) - p_past[zx(z, x)]);
+    p_future[grid_index] += ((2. * p_present[grid_index]) - p_past[grid_index]);
 
     for (var microphone_index: i32 = 0; microphone_index < infoI32.microphones_amount; microphone_index += 1)
     {
-        if (z == microphone_z[microphone_index] && x == microphone_x[microphone_index])
+        if (z == microphone_zx[microphone_index] && x == microphone_zx[microphone_x_index(microphone_index)])
         {
-            //FLIPPED_MICROPHONES_SIM
+            let bscan_index: i32 = microphone_index * infoI32.samples_per_microphone + infoI32.i;
+            p_future[grid_index] += flipped_bscan[bscan_index];
         }
     }
 
-    p_past[zx(z, x)] = p_present[zx(z, x)];
-    p_present[zx(z, x)] = p_future[zx(z, x)];
+    p_past[grid_index] = p_present[grid_index];
+    p_present[grid_index] = p_future[grid_index];
 }
 
 @compute

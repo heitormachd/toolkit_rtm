@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import re
 from SimulationConfig import SimulationConfig
 from WebGpuHandler import WebGpuHandler
 from functions import save_image, create_video
@@ -71,6 +70,7 @@ class SyntheticTimeReversal(SimulationConfig):
                 self.grid_size_x,
                 self.microphones_amount,
                 0,
+                self.flipped_bscan.shape[1],
             ],
             dtype=np.int32
         )
@@ -91,22 +91,6 @@ class SyntheticTimeReversal(SimulationConfig):
     def setup_gpu(self):
         self.wgpu_handler = WebGpuHandler(shader_file='./time_reversal.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
 
-        # Inject flipped microphones code into shader string
-        matches = re.findall(r'@binding\((\d+)\)', self.wgpu_handler.shader_string)
-        last_binding = int(matches[-1])
-        aux_string = ''
-        for i in range(self.microphones_amount):
-            aux_string += f'''@group(0) @binding({i + (last_binding + 1)})
-            var<storage,read> flipped_microphone_{i}: array<f32>;\n\n'''
-        self.wgpu_handler.shader_string = self.wgpu_handler.shader_string.replace('//FLIPPED_MICROPHONES_BINDINGS', aux_string)
-        aux_string = ''
-        for i in range(self.microphones_amount):
-            aux_string += f'''if (microphone_index == {i})
-                    {{
-                        p_future[zx(z, x)] += flipped_microphone_{i}[infoI32.i];
-                    }}\n'''
-        self.wgpu_handler.shader_string = self.wgpu_handler.shader_string.replace('//FLIPPED_MICROPHONES_SIM', aux_string)
-
         self.wgpu_handler.create_shader_module()
 
         # Data passed to gpu buffers
@@ -114,24 +98,17 @@ class SyntheticTimeReversal(SimulationConfig):
             'infoI32': self.info_i32,
             'infoF32': self.info_f32,
             'c': self.c,
-            'microphone_z': np.ascontiguousarray(self.microphone_z),
-            'microphone_x': np.ascontiguousarray(self.microphone_x),
+            'microphone_zx': np.ascontiguousarray(np.concatenate((self.microphone_z, self.microphone_x)).astype(np.int32)),
             'p_future': self.p_future,
             'p_present': self.p_present,
             'p_past': self.p_past,
-            'dp_1_z': self.dp_1_z,
-            'dp_1_x': self.dp_1_x,
-            'dp_2_z': self.dp_2_z,
-            'dp_2_x': self.dp_2_x,
-            'psi_z': self.psi_z,
-            'psi_x': self.psi_x,
-            'phi_z': self.phi_z,
-            'phi_x': self.phi_x,
-            'absorption_z': self.absorption_z,
-            'absorption_x': self.absorption_x,
-            'is_z_absorption': self.is_z_absorption_int,
-            'is_x_absorption': self.is_x_absorption_int,
-            **{f'flipped_microphone_{i}': np.ascontiguousarray(self.flipped_bscan[i]) for i in range(self.microphones_amount)}
+            'dp_1': np.ascontiguousarray(np.concatenate((self.dp_1_z.reshape(-1), self.dp_1_x.reshape(-1)))),
+            'dp_2': np.ascontiguousarray(np.concatenate((self.dp_2_z.reshape(-1), self.dp_2_x.reshape(-1)))),
+            'psi': np.ascontiguousarray(np.concatenate((self.psi_z.reshape(-1), self.psi_x.reshape(-1)))),
+            'phi': np.ascontiguousarray(np.concatenate((self.phi_z.reshape(-1), self.phi_x.reshape(-1)))),
+            'absorption': np.ascontiguousarray(np.concatenate((self.absorption_z.reshape(-1), self.absorption_x.reshape(-1)))),
+            'is_absorption': np.ascontiguousarray(np.concatenate((self.is_z_absorption_int.reshape(-1), self.is_x_absorption_int.reshape(-1)))),
+            'flipped_bscan': np.ascontiguousarray(self.flipped_bscan.reshape(-1)),
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
