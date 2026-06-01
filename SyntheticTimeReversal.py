@@ -25,6 +25,9 @@ class SyntheticTimeReversal(SimulationConfig):
         self.acou_sim_folder = './SyntheticAcouSim'
 
         self.bscan = np.load(f'{self.acou_sim_folder}/microphones_recording.npy')
+        self.recorded_time = np.int32(self.bscan.shape[1])
+        recorded_time = int(self.recorded_time)
+        tr_total_time = int(self.total_time)
 
         # print(f'bscan shape: {self.bscan.shape}')
 
@@ -33,7 +36,7 @@ class SyntheticTimeReversal(SimulationConfig):
         # plt.plot(self.bscan[-1, :])
         # plt.show()
 
-        # self.bscan[:, :200] = np.float32(0)
+        self.bscan[:, :200] = np.float32(0)
         
         # plt.figure()
         # plt.plot(self.bscan[0,:])
@@ -45,16 +48,21 @@ class SyntheticTimeReversal(SimulationConfig):
         self.microphones_amount = simulation_config['microphones_amount']
 
         source = np.load('./source.npy').astype(np.float32)
-        if len(source) < self.total_time:
-            source = np.pad(source, (0, self.total_time - len(source)), 'constant').astype(np.float32)
-        elif len(source) > self.total_time:
-            source = source[:self.total_time]
+        if len(source) < recorded_time:
+            source = np.pad(source, (0, recorded_time - len(source)), 'constant').astype(np.float32)
+        elif len(source) > recorded_time:
+            source = source[:recorded_time]
         source_index = ~np.isclose(source, 0)
         # Cut the recorded source
-        self.bscan[:, ~np.isclose(source_index, 0)] = np.float32(0)
+        self.bscan[:, source_index] = np.float32(0)
 
         # Flip bscan
         self.flipped_bscan = self.bscan[:, ::-1].astype(np.float32)
+        if tr_total_time > recorded_time:
+            extra_samples = tr_total_time - recorded_time
+            self.flipped_bscan = np.pad(self.flipped_bscan, ((0, 0), (0, extra_samples)), 'constant').astype(np.float32)
+        elif tr_total_time < recorded_time:
+            self.flipped_bscan = self.flipped_bscan[:, :tr_total_time].astype(np.float32)
 
         # WebGPU buffer
         self.info_i32 = np.array(

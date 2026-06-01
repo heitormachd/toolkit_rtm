@@ -4,9 +4,11 @@ from SyntheticTimeReversal import SyntheticTimeReversal
 from SyntheticReverseTimeMigration import SyntheticReverseTimeMigration
 from functions import convert_image_to_matrix
 
-IMAGE_PATH = './trnewyellow.png'
+IMAGE_PATH = './weird-shape.png'
 FORCE_RECEIVERS_TO_SURFACE = False
 SURFACE_RECEIVER_Z = np.int32(1)
+FORWARD_TOTAL_TIME = np.int32(4000)
+TIME_REVERSAL_TOTAL_TIME = np.int32(5000)
 
 c, source_z, source_x, receptor_z, receptor_x = convert_image_to_matrix(IMAGE_PATH)
 
@@ -34,7 +36,7 @@ for src in range(sources_amount):
         'dx': dx,
         'grid_size_z': grid_size_z,
         'grid_size_x': grid_size_x,
-        'total_time': np.int32(1400),
+        'total_time': FORWARD_TOTAL_TIME,
         'medium_c': np.float32(1500),
     }
 
@@ -48,20 +50,22 @@ for src in range(sources_amount):
     }
 
     simulation_config.update(synthetic_config)
+    time_reversal_config = simulation_config.copy()
+    time_reversal_config['total_time'] = TIME_REVERSAL_TOTAL_TIME
 
     print(f'Fonte {src}/{sources_amount - 1}')
 
     if src == 0:
         acou_sim = SyntheticAcouSim(**simulation_config)
         acou_sim.run(generate_video=True, animation_step=15)
-        tr_sim = SyntheticTimeReversal(**simulation_config)
+        tr_sim = SyntheticTimeReversal(**time_reversal_config)
         tr_sim.run(generate_video=True, animation_step=15)
-        # rtm_sim = SyntheticReverseTimeMigration(**simulation_config)
+        # rtm_sim = SyntheticReverseTimeMigration(**time_reversal_config)
         # rtm_sim.run(generate_video=True, animation_step=15)
     else:
         acou_sim = SyntheticAcouSim(**simulation_config)
         acou_sim.run(generate_video=False, animation_step=15)
-        tr_sim = SyntheticTimeReversal(**simulation_config)
+        tr_sim = SyntheticTimeReversal(**time_reversal_config)
         tr_sim.run(generate_video=False, animation_step=15)
-        # rtm_sim = SyntheticReverseTimeMigration(**simulation_config)
+        # rtm_sim = SyntheticReverseTimeMigration(**time_reversal_config)
         # rtm_sim.run(generate_video=False, animation_step=15)        

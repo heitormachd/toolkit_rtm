@@ -99,7 +99,7 @@ def plot_l2_norm():
 
     # l2_norm_log = np.log10(l2_norm + 1e-10)  # Add a small constant to avoid log(0)
 
-    vmax = np.percentile(l2_norm, 60)
+    vmax = np.percentile(l2_norm, 99)
 
     plt.figure()
     plt.imshow(l2_norm, aspect='auto', vmax=vmax, vmin=0)
