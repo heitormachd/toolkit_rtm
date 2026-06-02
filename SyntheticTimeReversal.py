@@ -45,9 +45,14 @@ class SyntheticTimeReversal(SimulationConfig):
         self.microphone_z = simulation_config['microphone_z']
         self.microphone_x = simulation_config['microphone_x']
         self.microphones_amount = simulation_config['microphones_amount']
+        self.source_z = np.atleast_1d(simulation_config['source_z']).astype(np.int32)
+        self.source_x = np.atleast_1d(simulation_config['source_x']).astype(np.int32)
         self.source_ids = np.atleast_1d(
             simulation_config.get('source_ids', simulation_config.get('source_id', 0))
         ).astype(np.int32)
+        self.sources_amount = np.int32(len(self.source_z))
+        if len(self.source_x) != self.sources_amount or len(self.source_ids) != self.sources_amount:
+            raise ValueError('source_z, source_x, and source_ids must have the same length.')
 
         sources = load_sources(self.source_ids, recorded_time)
         source_index = np.any(~np.isclose(sources, 0), axis=0)
@@ -125,7 +130,7 @@ class SyntheticTimeReversal(SimulationConfig):
         compute_sim = self.wgpu_handler.create_compute_pipeline("sim")
         compute_incr_time = self.wgpu_handler.create_compute_pipeline("incr_time")
 
-        l2_norm = np.zeros(self.grid_size_shape, dtype=np.float32)
+        max_abs_pressure = np.zeros(self.grid_size_shape, dtype=np.float32)
 
         for i in range(self.total_time):
             command_encoder = self.wgpu_handler.device.create_command_encoder()
@@ -169,15 +174,16 @@ class SyntheticTimeReversal(SimulationConfig):
                 plt.imshow(self.p_future, cmap='bwr')
                 plt.colorbar()
                 plt.scatter(self.microphone_x, self.microphone_z, s=0.05, color='purple')
+                plt.scatter(self.source_x, self.source_z, s=20, color='yellow', edgecolors='black')
                 plt.scatter(self.reflector_x, self.reflector_z, s=0.05, color='green')
                 plt.grid(True)
-                plt.title(f'Time Reversal - {i}')
+                plt.title(f'Time Reversal - {self.sources_amount} sources - {i}')
                 plt.savefig(f'{self.frames_folder}/frame_{i // animation_step}.png')
                 plt.close()
 
                 # save_image(self.p_future, f'{self.frames_folder}/frame_{i // animation_step}.png')
 
-            l2_norm += np.square(self.p_future)
+            max_abs_pressure = np.maximum(max_abs_pressure, np.abs(self.p_future))
 
             # Save last 2 frames (for RTM)
             if i == self.total_time - 2:
@@ -190,8 +196,8 @@ class SyntheticTimeReversal(SimulationConfig):
 
         print('Time Reversal finished.')
 
-        # Save L2-Norm
-        np.save(f'{self.folder}/l2_norm.npy', np.sqrt(l2_norm))
+        # Save peak absolute pressure over all time steps.
+        np.save(f'{self.folder}/max_abs_pressure.npy', max_abs_pressure)
 
         if generate_video:
             create_video(path=self.frames_folder, output_path=f'{self.folder}/tr.mp4')

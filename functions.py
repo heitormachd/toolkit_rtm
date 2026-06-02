@@ -187,21 +187,25 @@ def plot_source(source_dir='.'):
 
     return fig, ax
 
-def plot_l2_norm():
-    l2_norm = np.load('./SyntheticTR/l2_norm.npy')
+def plot_max_abs_pressure(image_path='./3sources.png'):
+    max_abs_pressure = np.load('./SyntheticTR/max_abs_pressure.npy')
+    image_path = Path(image_path)
+    if not image_path.exists() and image_path.name == '3sources.png':
+        image_path = Path('./map.png')
 
-    l2_norm[0:10, :] = np.float32(0)
+    _, source_z, source_x, _, _, _ = convert_image_to_matrix(image_path, return_source_ids=True)
 
-    # l2_norm_log = np.log10(l2_norm + 1e-10)  # Add a small constant to avoid log(0)
+    # max_abs_pressure[:, :] = np.float32(0)
 
-    vmax = np.percentile(l2_norm, 99)
+    vmax = np.percentile(max_abs_pressure, 99.99)
 
-    plt.figure()
-    plt.imshow(l2_norm, aspect='auto', vmax=vmax, vmin=0)
+    fig, ax = plt.subplots()
+    im = ax.imshow(max_abs_pressure, aspect='auto', cmap='magma', vmax=vmax, vmin=0)
 
-    plt.colorbar()
-    plt.grid()
-    plt.title('L2-Norm - Time Reversal')
+    fig.colorbar(im, ax=ax, label='Max |pressure|')
+    ax.scatter(source_x, source_z, s=5, color='yellow', edgecolors='black')
+    ax.grid()
+    ax.set_title('Max Absolute Pressure - Synthetic Time Reversal')
     plt.show()
 
 
@@ -343,7 +347,7 @@ def convert_image_to_matrix(image_path, return_source_ids=False):
 
 if __name__ == "__main__":
     # plot_accumulated_product()
-    create_source(n_sources=3, samples=3500 , delay_between_sources=1000)
-    plot_source()
-    plot_l2_norm()
+    # create_source(n_sources=3, samples=3500 , delay_between_sources=800)
+    # plot_source()
+    plot_max_abs_pressure()
     temporal_spatial_plot()

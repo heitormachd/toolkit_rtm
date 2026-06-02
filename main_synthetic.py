@@ -4,11 +4,11 @@ from SyntheticTimeReversal import SyntheticTimeReversal
 from SyntheticReverseTimeMigration import SyntheticReverseTimeMigration
 from functions import convert_image_to_matrix
 
-IMAGE_PATH = './big3s.png'
+IMAGE_PATH = './3sources.png'
 FORCE_RECEIVERS_TO_SURFACE = False
 SURFACE_RECEIVER_Z = np.int32(1)
-FORWARD_TOTAL_TIME = np.int32(6500)
-TIME_REVERSAL_TOTAL_TIME = np.int32(8000)
+FORWARD_TOTAL_TIME = np.int32(2600)
+TIME_REVERSAL_TOTAL_TIME = np.int32(3600)
 
 c, source_z, source_x, receptor_z, receptor_x, source_ids = convert_image_to_matrix(IMAGE_PATH, return_source_ids=True)
 

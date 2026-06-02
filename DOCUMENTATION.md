@@ -237,6 +237,8 @@ Time reversal on synthetic data. Same as `TimeReversal` but:
 - Replaces reflector velocity (c=0) with medium velocity for backpropagation
 - Blanks out the first 1000 samples to suppress direct arrivals
 
+**Output:** Final pressure frames for RTM input, peak absolute pressure distribution.
+
 ### SyntheticReverseTimeMigration.py
 
 RTM on synthetic data with **Poynting vector imaging**. Produces two images:
@@ -263,7 +265,7 @@ Utility functions for visualization and I/O.
 | `temporal_spatial_plot()`       | Visualize synthetic recordings as a samples x channels colormap               |
 | `plot_accumulated_product()`    | Post-processing: sum RTM images across emitters, compare standard vs Poynting |
 | `plot_source()`                 | Visualize source waveform                                                     |
-| `plot_l2_norm()`                | Visualize TR energy distribution                                              |
+| `plot_max_abs_pressure()`       | Visualize synthetic TR peak absolute pressure with source markers              |
 
 ### signal_processing_functions.py
 
@@ -403,7 +405,7 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
       ├── Replace reflector velocity (c=0) with medium velocity (1500 m/s)
       ├── Suppress direct arrivals using the union of all source waveforms
       ├── Back-propagate on GPU
-      └── Save final frames → last_frame.npy, second_to_last_frame.npy
+      └── Save final frames + peak absolute pressure → last_frame.npy, second_to_last_frame.npy, max_abs_pressure.npy
 
    c. RTM Imaging (SyntheticReverseTimeMigration)
       ├── Propagate the combined multi-source downgoing wavefield
@@ -514,7 +516,7 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 | `second_to_last_frame.npy` | Penultimate pressure field from TR |
 | `accumulated_product_0.npy` | Standard RTM image for the combined multi-source simulation |
 | `accumulated_product_poynting_0.npy` | Poynting RTM image for the combined multi-source simulation |
-| `l2_norm.npy` | L2-norm energy from time reversal |
+| `max_abs_pressure.npy` | Peak absolute pressure from synthetic time reversal |
 | `frames/*.png` | Animation frames (sequential) |
 | `*.mp4` | Simulation videos (H.264, 25 fps) |
 
