@@ -5,6 +5,13 @@ import subprocess
 from pathlib import Path
 
 
+_DAS_NEIGHBOR_OFFSETS = (
+    (-1, -1), (-1, 0), (-1, 1),
+    (0, -1),           (0, 1),
+    (1, -1),  (1, 0),  (1, 1),
+)
+
+
 def temporal_spatial_plot(recording_path='./SyntheticAcouSim/microphones_recording.npy', *, cmap='seismic', percentile=99.5):
     recording = np.load(recording_path)
     if recording.ndim != 2:
@@ -255,6 +262,101 @@ def save_rtm_image(upper_left, upper_right, bottom_left, bottom_right, path):
     plt.close()
 
 
+def _format_pixel(pixel):
+    z, x = pixel
+    return f'({z}, {x})'
+
+
+def _order_receptors_along_das_line(receptor_mask, image_path):
+    receptor_positions = np.argwhere(receptor_mask)
+    if receptor_positions.shape[0] < 2:
+        raise ValueError(
+            f'Receptors in {image_path} must form a DAS line with at least two pixels.'
+        )
+
+    receptor_points = {tuple(map(int, position)) for position in receptor_positions}
+    start = min(receptor_points)
+    stack = [start]
+    visited = {start}
+
+    while stack:
+        z, x = stack.pop()
+        for dz, dx in _DAS_NEIGHBOR_OFFSETS:
+            neighbor = (z + dz, x + dx)
+            if neighbor in receptor_points and neighbor not in visited:
+                visited.add(neighbor)
+                stack.append(neighbor)
+
+    if len(visited) != len(receptor_points):
+        first_disconnected = min(receptor_points - visited)
+        raise ValueError(
+            f'Receptors in {image_path} must form one connected DAS line. '
+            f'Found a disconnected receptor pixel at {_format_pixel(first_disconnected)}.'
+        )
+
+    adjacency = {}
+    for z, x in receptor_points:
+        neighbors = []
+        for dz, dx in _DAS_NEIGHBOR_OFFSETS:
+            neighbor = (z + dz, x + dx)
+            if neighbor in receptor_points:
+                neighbors.append(neighbor)
+        adjacency[(z, x)] = sorted(neighbors)
+
+    endpoints = sorted(point for point, neighbors in adjacency.items() if len(neighbors) == 1)
+    branch_points = sorted(point for point, neighbors in adjacency.items() if len(neighbors) > 2)
+    isolated_points = sorted(point for point, neighbors in adjacency.items() if len(neighbors) == 0)
+
+    if isolated_points:
+        raise ValueError(
+            f'Receptors in {image_path} must form one connected DAS line. '
+            f'Found an isolated receptor pixel at {_format_pixel(isolated_points[0])}.'
+        )
+    if branch_points:
+        raise ValueError(
+            f'Receptors in {image_path} must form a non-branching one-pixel-wide DAS line. '
+            f'Found a branch or thick/ambiguous section at {_format_pixel(branch_points[0])}.'
+        )
+    if len(endpoints) != 2:
+        raise ValueError(
+            f'Receptors in {image_path} must form a non-branching DAS line with exactly two endpoints. '
+            f'Found {len(endpoints)} endpoints.'
+        )
+
+    ordered_receptors = []
+    walked = set()
+    previous = None
+    current = endpoints[0]
+
+    while True:
+        ordered_receptors.append(current)
+        walked.add(current)
+
+        next_candidates = [
+            neighbor
+            for neighbor in adjacency[current]
+            if neighbor != previous and neighbor not in walked
+        ]
+        if not next_candidates:
+            break
+        if len(next_candidates) > 1:
+            raise ValueError(
+                f'Receptors in {image_path} must form a single unambiguous DAS line. '
+                f'Found multiple traversal options at {_format_pixel(current)}.'
+            )
+
+        previous, current = current, next_candidates[0]
+
+    if len(ordered_receptors) != len(receptor_points) or ordered_receptors[-1] != endpoints[1]:
+        raise ValueError(
+            f'Receptors in {image_path} must form a single unambiguous DAS line from one endpoint to the other.'
+        )
+
+    receptor_z = np.array([z for z, _ in ordered_receptors], dtype=np.int32)
+    receptor_x = np.array([x for _, x in ordered_receptors], dtype=np.int32)
+    return receptor_z, receptor_x
+
+
 def convert_image_to_matrix(image_path, return_source_ids=False):
     rgb_raw_image = np.asarray(imread(image_path))
 
@@ -323,10 +425,9 @@ def convert_image_to_matrix(image_path, return_source_ids=False):
     rgb_float[is_red] = np.float32(6400)
 
     source_pos = np.where(is_source | is_white)
-    receptor_pos = np.where(is_cyan | is_white)
+    receptor_mask = is_cyan | is_white
 
     source_z, source_x = np.int32(source_pos)
-    receptor_z, receptor_x = np.int32(receptor_pos)
     source_id_matrix = (source_id_tens.astype(np.int32) * 10) + source_id_ones.astype(np.int32)
     source_ids = source_id_matrix[source_pos].astype(np.int32)
     source_ids[is_white[source_pos]] = np.int32(0)
@@ -335,10 +436,12 @@ def convert_image_to_matrix(image_path, return_source_ids=False):
         raise ValueError(
             f'No sources found in {image_path}. Use #FFFF00 through #FFFF99 for source-only markers or white for colocated source/receptor markers.'
         )
-    if receptor_z.size == 0:
+    if not np.any(receptor_mask):
         raise ValueError(
             f'No receptors found in {image_path}. Use cyan pixels for receptor-only markers or white for colocated source/receptor markers.'
         )
+
+    receptor_z, receptor_x = _order_receptors_along_das_line(receptor_mask, image_path)
 
     if return_source_ids:
         return rgb_float, source_z, source_x, receptor_z, receptor_x, source_ids
