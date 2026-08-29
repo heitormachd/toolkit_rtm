@@ -49,47 +49,43 @@ Two imaging conditions are supported:
 
 ```
 acoustics_imaging_pv/
-├── Entry Points
-│   ├── main.py                            # Real/recorded data workflow
-│   ├── main_synthetic.py                  # Synthetic data workflow
-│   ├── main_aux.py                        # Auxiliary plotting
-│   └── rtm.py                            # Alternative Taichi-based RTM
-│
-├── Core Framework
+├── acoustics_imaging/                     # Core Python package
 │   ├── SimulationConfig.py                # Base config (grid, CFL, CPML)
 │   ├── WebGpuHandler.py                   # GPU pipeline management
-│   └── InputTest.py                       # Data loading (MATLAB, M2K)
+│   ├── InputTest.py                       # Data loading (MATLAB, M2K)
+│   ├── TimeReversal.py                    # Real-data time reversal
+│   ├── ReverseTimeMigration.py            # Real-data RTM
+│   ├── SyntheticAcouSim.py                # Synthetic forward simulation
+│   ├── SyntheticTimeReversal.py           # Synthetic time reversal
+│   ├── SyntheticReverseTimeMigration.py   # Synthetic RTM + Poynting vectors
+│   ├── functions.py                       # Image I/O, video, and plotting
+│   └── signal_processing_functions.py     # FFT, filtering, and windowing
 │
-├── Simulation Classes (Real Data)
-│   ├── TimeReversal.py                    # Time reversal simulation
-│   └── ReverseTimeMigration.py            # RTM simulation
+├── scripts/                               # Runnable workflows and utilities
+│   ├── real_workflow.py
+│   ├── synthetic_workflow.py
+│   ├── plot_results.py
+│   ├── coherent_sum.py
+│   ├── generate_flowchart.py
+│   ├── generate_flowchart_ptbr.py
+│   └── rtm_taichi.py                      # Alternative Taichi-based RTM
 │
-├── Simulation Classes (Synthetic Data)
-│   ├── SyntheticAcouSim.py                # Forward acoustic simulation
-│   ├── SyntheticTimeReversal.py           # Time reversal on synthetic data
-│   └── SyntheticReverseTimeMigration.py   # RTM with Poynting vectors
+├── shaders/                                # GPU kernels (WGSL)
+│   ├── synthetic_acou_sim.wgsl
+│   ├── time_reversal.wgsl
+│   └── reverse_time_migration.wgsl
 │
-├── GPU Shaders (WGSL)
-│   ├── synthetic_acou_sim.wgsl            # Forward simulation kernels
-│   ├── time_reversal.wgsl                 # Time reversal kernels
-│   └── reverse_time_migration.wgsl        # RTM kernels (+ Poynting)
+├── assets/
+│   ├── models/                             # Color-coded velocity/input images
+│   └── sources/                            # source.npy and source0...source99.npy
 │
-├── Utilities
-│   ├── functions.py                       # Image I/O, video, plotting
-│   └── signal_processing_functions.py     # FFT, filtering, windowing
+├── data/                                   # Local recorded data (not bundled)
+│   ├── acude/
+│   └── panther/
 │
-├── Data Files
-│   ├── source0.npy...source99.npy         # Per-source synthetic waveforms
-│   ├── source.npy                         # Legacy alias for source0.npy / real-data waveform
-│   └── map.png                            # Velocity model (color-coded)
-│
-├── Output Directories (generated at runtime)
-│   ├── SyntheticAcouSim/
-│   ├── SyntheticTR/
-│   ├── SyntheticRTM/
-│   ├── TimeReversal/
-│   └── ReverseTimeMigration/
-│
+├── docs/                                   # This document and figures
+├── outputs/                                # Generated simulations and analysis
+├── tests/
 └── requirements.txt
 ```
 
@@ -108,9 +104,9 @@ All simulation classes inherit from `SimulationConfig`, which initializes the gr
 
 ### Simulator Flowchart
 
-![Simulator flowchart](flowchart_simulator.png)
+![Simulator flowchart](figures/flowchart_simulator.png)
 
-> Run `generate_flowchart.py` to regenerate `flowchart_simulator.pdf` (vector) and `flowchart_simulator.png` (300 dpi raster).
+> Run `python -m scripts.generate_flowchart` to regenerate the flowchart files in `docs/figures/`.
 
 **Data transferred at each CPU / GPU boundary:**
 
@@ -124,7 +120,7 @@ All simulation classes inherit from `SimulationConfig`, which initializes the gr
 
 **Synthetic Pipeline:**
 ```
-map.png (velocity model)
+assets/models/map.png (velocity model)
     │
     ▼
 SyntheticAcouSim ──► microphones_recording.npy (synthetic B-scan)
@@ -158,7 +154,7 @@ TimeReversal ──► last_frame.npy, second_to_last_frame.npy
 
 ## 3. Core Components
 
-### SimulationConfig.py
+### `acoustics_imaging/SimulationConfig.py`
 
 Base configuration class for all simulations. Initializes:
 
@@ -177,7 +173,7 @@ Base configuration class for all simulations. Initializes:
 
 Computes and prints the CFL stability number on initialization.
 
-### WebGpuHandler.py
+### `acoustics_imaging/WebGpuHandler.py`
 
 Manages the GPU compute pipeline via the `wgpu` library.
 
@@ -194,7 +190,7 @@ Manages the GPU compute pipeline via the `wgpu` library.
 **Helper function:**
 - `read_shader_bindings(shader_lines)`: Parses `@binding` and `@group` WGSL decorators to extract buffer metadata.
 
-### InputTest.py
+### `acoustics_imaging/InputTest.py`
 
 Loads and preprocesses recorded acoustic data.
 
@@ -209,13 +205,13 @@ Loads and preprocesses recorded acoustic data.
 | `resample_bscan(dt_new)` | Cubic interpolation to new sampling rate |
 | `process_bscan()` | Preprocessing: normalize, FFT, low-pass filter at 180 Hz, IFFT |
 
-### TimeReversal.py
+### `acoustics_imaging/TimeReversal.py`
 
 Time reversal simulation for real recorded data. Flips the B-scan in time and back-propagates it through the velocity model by injecting the reversed signals at microphone positions.
 
 **Output:** Final pressure frames for RTM input, L2-norm energy distribution.
 
-### ReverseTimeMigration.py
+### `acoustics_imaging/ReverseTimeMigration.py`
 
 RTM imaging for real data. Propagates two wavefields simultaneously:
 - Downgoing: source-driven forward propagation
@@ -225,13 +221,13 @@ Accumulates the crosscorrelation product at each time step.
 
 **Output:** `accumulated_product.npy` — the RTM image.
 
-### SyntheticAcouSim.py
+### `acoustics_imaging/SyntheticAcouSim.py`
 
 Forward wave simulation generating synthetic receiver data. Propagates a source wavelet through a velocity model and records the pressure at microphone positions.
 
 **Output:** `microphones_recording.npy` — synthetic B-scan.
 
-### SyntheticTimeReversal.py
+### `acoustics_imaging/SyntheticTimeReversal.py`
 
 Time reversal on synthetic data. Same as `TimeReversal` but:
 - Replaces reflector velocity (c=0) with medium velocity for backpropagation
@@ -239,7 +235,7 @@ Time reversal on synthetic data. Same as `TimeReversal` but:
 
 **Output:** Final pressure frames for RTM input, peak absolute pressure distribution.
 
-### SyntheticReverseTimeMigration.py
+### `acoustics_imaging/SyntheticReverseTimeMigration.py`
 
 RTM on synthetic data with **Poynting vector imaging**. Produces two images:
 
@@ -250,7 +246,7 @@ RTM on synthetic data with **Poynting vector imaging**. Produces two images:
 
 Includes velocity field computation for the Poynting vector calculation.
 
-### functions.py
+### `acoustics_imaging/functions.py`
 
 Utility functions for visualization and I/O.
 
@@ -267,7 +263,7 @@ Utility functions for visualization and I/O.
 | `plot_source()`                 | Visualize source waveform                                                     |
 | `plot_max_abs_pressure()`       | Visualize synthetic TR peak absolute pressure with source markers              |
 
-### signal_processing_functions.py
+### `acoustics_imaging/signal_processing_functions.py`
 
 | Function | Description |
 |----------|-------------|
@@ -275,7 +271,7 @@ Utility functions for visualization and I/O.
 | `synthesize_signal(signal, peaks, ...)` | Time-align multi-receiver signals via circular shift |
 | `blackman_window(signal, centers, wavelength)` | Windowed FFT around pulse centers |
 
-### rtm.py (Alternative Implementation)
+### `scripts/rtm_taichi.py` (Alternative Implementation)
 
 Standalone RTM implementation using the **Taichi** framework instead of WebGPU:
 - Uses 8th-order finite difference stencils (higher accuracy)
@@ -377,10 +373,10 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 
 ## 5. Workflows
 
-### Synthetic Data Workflow (`main_synthetic.py`)
+### Synthetic Data Workflow (`scripts/synthetic_workflow.py`)
 
 ```
-1. Load velocity model from map.png
+1. Load velocity model from `assets/models/map.png` (the example script currently uses `ws3s.png`)
    └── convert_image_to_matrix() extracts velocity grid plus independent source and receptor positions
 
    PNG marker legend:
@@ -419,7 +415,7 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
    └── Overlay ground-truth reflector positions
 ```
 
-### Real Data Workflow (`main.py`)
+### Real Data Workflow (`scripts/real_workflow.py`)
 
 ```
 1. Load recorded data
@@ -453,7 +449,7 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 
 ### Grid Parameters
 
-| Parameter | Real Data (main.py) | Synthetic (main_synthetic.py) |
+| Parameter | Real Data (`scripts/real_workflow.py`) | Synthetic (`scripts/synthetic_workflow.py`) |
 |-----------|--------------------|-----------------------------|
 | `dz` | 0.01 m | $1.5 \times 10^{-3}$ m |
 | `dx` | 0.01 m | $1.5 \times 10^{-3}$ m |
@@ -496,7 +492,7 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 | `.npy` | Pre-computed source waveform | `functions.load_source(source_id, total_time)` |
 | `.png` | Color-coded velocity model | `functions.convert_image_to_matrix()` |
 
-### Velocity Model Color Encoding (map.png)
+### Velocity Model Color Encoding (`assets/models/map.png`)
 
 | Color | Velocity (m/s) | Meaning |
 |-------|----------------|---------|
@@ -511,14 +507,14 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 
 | File | Content |
 |------|---------|
-| `microphones_recording.npy` | Combined synthetic B-scan stored as receivers x time; `temporal_spatial_plot()` displays it as samples x channels |
-| `last_frame.npy` | Final pressure field from time reversal |
-| `second_to_last_frame.npy` | Penultimate pressure field from TR |
-| `accumulated_product_0.npy` | Standard RTM image for the combined multi-source simulation |
-| `accumulated_product_poynting_0.npy` | Poynting RTM image for the combined multi-source simulation |
-| `max_abs_pressure.npy` | Peak absolute pressure from synthetic time reversal |
-| `frames/*.png` | Animation frames (sequential) |
-| `*.mp4` | Simulation videos (H.264, 25 fps) |
+| `outputs/simulations/synthetic/SyntheticAcouSim/microphones_recording.npy` | Combined synthetic B-scan stored as receivers x time; `temporal_spatial_plot()` displays it as samples x channels |
+| `outputs/simulations/synthetic/SyntheticTR/last_frame.npy` | Final pressure field from time reversal |
+| `outputs/simulations/synthetic/SyntheticTR/second_to_last_frame.npy` | Penultimate pressure field from TR |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_0.npy` | Standard RTM image for the combined multi-source simulation |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_poynting_0.npy` | Poynting RTM image for the combined multi-source simulation |
+| `outputs/simulations/synthetic/SyntheticTR/max_abs_pressure.npy` | Peak absolute pressure from synthetic time reversal |
+| `*/frames/*.png` | Animation frames (sequential) |
+| `*/*.mp4` | Simulation videos (H.264, 25 fps) |
 
 ---
 
@@ -559,34 +555,42 @@ Ensure `ffmpeg` is available on PATH for video generation.
 ### Running the Synthetic Workflow
 
 ```bash
-python main_synthetic.py
+python -m scripts.synthetic_workflow
 ```
 
 Requires:
-- `map.png` in the project root (color-coded velocity model)
-- `source0.npy`...`source99.npy` in the project root as needed by source colors. `source.npy` is accepted as a compatibility alias for source ID 0.
+- A color-coded model in `assets/models/` (the example uses `ws3s.png`)
+- `source0.npy`...`source99.npy` in `assets/sources/` as needed by source colors. `source.npy` is accepted as a compatibility alias for source ID 0.
 
-Produces output in `SyntheticAcouSim/`, `SyntheticTR/`, and `SyntheticRTM/` directories.
+Produces output in `outputs/simulations/synthetic/`.
 
 ### Running the Real Data Workflow
 
 ```bash
-python main.py
+python -m scripts.real_workflow
 ```
 
 Requires:
-- Recorded data file (`.mat` for acude, `.m2k` for panther)
-- `source.npy` in the project root
+- Recorded data file (`.mat` under `data/acude/`, `.m2k` under `data/panther/`)
+- `source.npy` in `assets/sources/`
 
-Edit `main.py` to select dataset (`'acude'` or `'panther'`) and configure grid parameters.
+Edit `scripts/real_workflow.py` to select dataset (`'acude'` or `'panther'`) and configure grid parameters.
 
 ### Plotting Results
 
 ```bash
-python main_aux.py
+python -m scripts.plot_results
 ```
 
 Loads accumulated RTM products from all emitters, sums them, and displays standard vs Poynting RTM comparison with ground-truth reflector overlay.
+
+The coherent-sum analysis can be run with:
+
+```bash
+python -m scripts.coherent_sum
+```
+
+Its intermediate arrays and plots are stored in `outputs/analysis/coherent_sum/`.
 
 ### GPU Compute Kernels
 

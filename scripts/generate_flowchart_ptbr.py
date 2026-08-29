@@ -3,6 +3,8 @@ import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, Ellipse
 import matplotlib as mpl
 
+from acoustics_imaging.paths import DOCS_FIGURES_DIR
+
 # ── estilo global ──────────────────────────────────────────────────────────────
 mpl.rcParams.update({
     'font.family':     'serif',
@@ -174,8 +176,9 @@ arrow(C_L, y_save - BH / 2, C_L, y_end  + BH * 0.40)
 
 # ── salvar ────────────────────────────────────────────────────────────────────
 plt.tight_layout(pad=0.2)
+DOCS_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 for ext in ('pdf', 'png'):
-    fname = f'flowchart_simulator_ptbr.{ext}'
+    fname = DOCS_FIGURES_DIR / f'flowchart_simulator_ptbr.{ext}'
     plt.savefig(fname, bbox_inches='tight', dpi=300,
                 facecolor='white', edgecolor='none')
     print(f'Salvo  {fname}')

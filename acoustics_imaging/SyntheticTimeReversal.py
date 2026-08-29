@@ -1,42 +1,72 @@
 import numpy as np
 import os
-from InputTest import InputTest
-from SimulationConfig import SimulationConfig
-from WebGpuHandler import WebGpuHandler
-from functions import save_image, create_video
+from .SimulationConfig import SimulationConfig
+from .WebGpuHandler import WebGpuHandler
+from .functions import save_image, create_video, load_sources
+from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_ACOU_SIM_OUTPUT_DIR, SYNTHETIC_TR_OUTPUT_DIR
 import matplotlib.pyplot as plt
 
 
-class TimeReversal(SimulationConfig):
+class SyntheticTimeReversal(SimulationConfig):
     def __init__(self, **simulation_config):
         super().__init__(**simulation_config)
 
+        self.reflector_z, self.reflector_x = np.int32(np.where(self.c == 0))
+        self.reflectors_amount = np.int32(len(self.reflector_z))
+
+        self.c = self.c.copy()
+
+        self.c[self.c == np.float32(0)] = simulation_config['medium_c']
+
         # Create folders
-        self.folder = './TimeReversal'
-        self.frames_folder = f'{self.folder}/frames'
-        os.makedirs(self.frames_folder, exist_ok=True)
+        self.folder = SYNTHETIC_TR_OUTPUT_DIR
+        self.frames_folder = self.folder / 'frames'
+        self.frames_folder.mkdir(parents=True, exist_ok=True)
+        self.acou_sim_folder = SYNTHETIC_ACOU_SIM_OUTPUT_DIR
 
-        input_test: InputTest = simulation_config['input_test']
-        self.bscan = input_test.bscan
-        self.microphones_distance = input_test.microphones_distance
-        self.microphones_amount = input_test.microphones_amount
-        self.total_time = input_test.total_time
-        print(f'Total time: {self.total_time}')
+        self.bscan = np.load(self.acou_sim_folder / 'microphones_recording.npy')
+        self.recorded_time = np.int32(self.bscan.shape[1])
+        recorded_time = int(self.recorded_time)
+        tr_total_time = int(self.total_time)
 
-        # Microphones' position
-        self.microphone_x = []
-        for rp in range(self.microphones_amount):
-            self.microphone_x.append((self.microphones_distance * rp) / self.dx)
-        self.microphone_x = (np.int32(np.asarray(self.microphone_x))
-                           + np.int32((self.grid_size_x - self.microphone_x[-1]) / 2))
-        self.microphone_z = np.full(self.microphones_amount, 1, dtype=np.int32)  # Não colocar microfones no índice 0.
+        # print(f'bscan shape: {self.bscan.shape}')
 
-        # Save emitter's position to use as source position in Reverse Time Migration
-        np.save(f'{self.folder}/emitter_z.npy', self.microphone_z[input_test.fmc_emitter])
-        np.save(f'{self.folder}/emitter_x.npy', self.microphone_x[input_test.fmc_emitter])
+        # plt.figure()
+        # plt.plot(self.bscan[0,:])
+        # plt.plot(self.bscan[-1, :])
+        # plt.show()
+
+        self.bscan[:, :200] = np.float32(0)
+        
+        # plt.figure()
+        # plt.plot(self.bscan[0,:])
+        # plt.plot(self.bscan[-1, :])
+        # plt.show()
+        
+        self.microphone_z = simulation_config['microphone_z']
+        self.microphone_x = simulation_config['microphone_x']
+        self.microphones_amount = simulation_config['microphones_amount']
+        self.source_z = np.atleast_1d(simulation_config['source_z']).astype(np.int32)
+        self.source_x = np.atleast_1d(simulation_config['source_x']).astype(np.int32)
+        self.source_ids = np.atleast_1d(
+            simulation_config.get('source_ids', simulation_config.get('source_id', 0))
+        ).astype(np.int32)
+        self.sources_amount = np.int32(len(self.source_z))
+        if len(self.source_x) != self.sources_amount or len(self.source_ids) != self.sources_amount:
+            raise ValueError('source_z, source_x, and source_ids must have the same length.')
+
+        sources = load_sources(self.source_ids, recorded_time, source_dir=SOURCES_DIR)
+        source_index = np.any(~np.isclose(sources, 0), axis=0)
+        # Cut the recorded source
+        self.bscan[:, source_index] = np.float32(0)
 
         # Flip bscan
         self.flipped_bscan = self.bscan[:, ::-1].astype(np.float32)
+        if tr_total_time > recorded_time:
+            extra_samples = tr_total_time - recorded_time
+            self.flipped_bscan = np.pad(self.flipped_bscan, ((0, 0), (0, extra_samples)), 'constant').astype(np.float32)
+        elif tr_total_time < recorded_time:
+            self.flipped_bscan = self.flipped_bscan[:, :tr_total_time].astype(np.float32)
 
         # WebGPU buffer
         self.info_i32 = np.array(
@@ -64,7 +94,7 @@ class TimeReversal(SimulationConfig):
         self.setup_gpu()
 
     def setup_gpu(self):
-        self.wgpu_handler = WebGpuHandler(shader_file='./time_reversal.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
+        self.wgpu_handler = WebGpuHandler(shader_file=SHADERS_DIR / 'time_reversal.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
 
         self.wgpu_handler.create_shader_module()
 
@@ -89,6 +119,11 @@ class TimeReversal(SimulationConfig):
         self.wgpu_handler.create_buffers(wgsl_data)
 
     def run(self, generate_video: bool, animation_step: int):
+        if generate_video:
+            for frame_name in os.listdir(self.frames_folder):
+                if frame_name.startswith('frame_') and frame_name.endswith('.png'):
+                    os.remove(os.path.join(self.frames_folder, frame_name))
+
         compute_forward_diff = self.wgpu_handler.create_compute_pipeline("forward_diff")
         compute_after_forward = self.wgpu_handler.create_compute_pipeline("after_forward")
         compute_backward_diff = self.wgpu_handler.create_compute_pipeline("backward_diff")
@@ -96,7 +131,7 @@ class TimeReversal(SimulationConfig):
         compute_sim = self.wgpu_handler.create_compute_pipeline("sim")
         compute_incr_time = self.wgpu_handler.create_compute_pipeline("incr_time")
 
-        l2_norm = np.zeros(self.grid_size_shape, dtype=np.float32)
+        max_abs_pressure = np.zeros(self.grid_size_shape, dtype=np.float32)
 
         for i in range(self.total_time):
             command_encoder = self.wgpu_handler.device.create_command_encoder()
@@ -137,29 +172,33 @@ class TimeReversal(SimulationConfig):
 
             if generate_video and i % animation_step == 0:
                 plt.figure()
-                plt.imshow(self.p_future, cmap='viridis', vmax=0.55, vmin=-0.55)
+                plt.imshow(self.p_future, cmap='bwr')
                 plt.colorbar()
                 plt.scatter(self.microphone_x, self.microphone_z, s=0.05, color='purple')
+                plt.scatter(self.source_x, self.source_z, s=20, color='yellow', edgecolors='black')
+                plt.scatter(self.reflector_x, self.reflector_z, s=0.05, color='green')
                 plt.grid(True)
-                plt.title(f'Time Reversal - {i}')
-                plt.savefig(f'{self.frames_folder}/frame_{i // animation_step}.png')
+                plt.title(f'Time Reversal - {self.sources_amount} sources - {i}')
+                plt.savefig(self.frames_folder / f'frame_{i // animation_step}.png')
                 plt.close()
 
-            l2_norm += np.square(self.p_future)
+                # save_image(self.p_future, f'{self.frames_folder}/frame_{i // animation_step}.png')
+
+            max_abs_pressure = np.maximum(max_abs_pressure, np.abs(self.p_future))
 
             # Save last 2 frames (for RTM)
             if i == self.total_time - 2:
-                np.save(f'{self.folder}/second_to_last_frame.npy', self.p_future)
+                np.save(self.folder / 'second_to_last_frame.npy', self.p_future)
             if i == self.total_time - 1:
-                np.save(f'{self.folder}/last_frame.npy', self.p_future)
+                np.save(self.folder / 'last_frame.npy', self.p_future)
 
             if i % 300 == 0:
                 print(f'Time Reversal - i={i}')
 
         print('Time Reversal finished.')
 
-        # Save L2-Norm
-        np.save(f'{self.folder}/l2_norm.npy', np.sqrt(l2_norm))
+        # Save peak absolute pressure over all time steps.
+        np.save(self.folder / 'max_abs_pressure.npy', max_abs_pressure)
 
         if generate_video:
-            create_video(path=self.frames_folder, output_path=f'{self.folder}/tr.mp4')
+            create_video(path=self.frames_folder, output_path=self.folder / 'tr.mp4')

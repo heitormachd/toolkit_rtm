@@ -167,3 +167,9 @@ cython_debug/
 #.idea/
 /acude/
 /panther/
+/data/
+/outputs/
+
+# Keep the tracked example inputs visible after organizing the repository.
+!assets/models/map.png
+!assets/sources/source.npy

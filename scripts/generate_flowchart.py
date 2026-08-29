@@ -5,14 +5,16 @@ GPU acoustic simulator architecture.
 
 Outputs
 -------
-flowchart_simulator.pdf   – vector (embed directly in LaTeX)
-flowchart_simulator.png   – 300 dpi raster (for Word / quick preview)
+docs/figures/flowchart_simulator.pdf   – vector (embed directly in LaTeX)
+docs/figures/flowchart_simulator.png   – 300 dpi raster (for Word / quick preview)
 """
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, Ellipse
 import matplotlib as mpl
+
+from acoustics_imaging.paths import DOCS_FIGURES_DIR
 
 # ── global style ──────────────────────────────────────────────────────────────
 mpl.rcParams.update({
@@ -196,8 +198,9 @@ arrow(C_L, y_save - BH / 2, C_L, y_end  + BH * 0.40)
 
 # ── save ──────────────────────────────────────────────────────────────────────
 plt.tight_layout(pad=0.2)
+DOCS_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 for ext in ('pdf', 'png'):
-    fname = f'flowchart_simulator.{ext}'
+    fname = DOCS_FIGURES_DIR / f'flowchart_simulator.{ext}'
     plt.savefig(fname, bbox_inches='tight', dpi=300,
                 facecolor='white', edgecolor='none')
     print(f'Saved  {fname}')

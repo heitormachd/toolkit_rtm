@@ -1,0 +1,28 @@
+"""Project paths shared by simulations, scripts, and post-processing."""
+
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ASSETS_DIR = PROJECT_ROOT / "assets"
+MODELS_DIR = ASSETS_DIR / "models"
+SOURCES_DIR = ASSETS_DIR / "sources"
+DATA_DIR = PROJECT_ROOT / "data"
+DOCS_DIR = PROJECT_ROOT / "docs"
+DOCS_FIGURES_DIR = DOCS_DIR / "figures"
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+PLOTS_DIR = OUTPUTS_DIR / "analysis" / "plots"
+COHERENT_SUM_OUTPUT_DIR = OUTPUTS_DIR / "analysis" / "coherent_sum"
+REAL_SIMULATION_OUTPUT_DIR = OUTPUTS_DIR / "simulations" / "real"
+SYNTHETIC_SIMULATION_OUTPUT_DIR = OUTPUTS_DIR / "simulations" / "synthetic"
+SHADERS_DIR = PROJECT_ROOT / "shaders"
+
+ACUDE_DATA_DIR = DATA_DIR / "acude"
+PANTHER_DATA_DIR = DATA_DIR / "panther"
+ALTERNATIVE_MODELS_DIR = DATA_DIR / "models"
+
+REAL_TIME_REVERSAL_OUTPUT_DIR = REAL_SIMULATION_OUTPUT_DIR / "TimeReversal"
+REAL_RTM_OUTPUT_DIR = REAL_SIMULATION_OUTPUT_DIR / "ReverseTimeMigration"
+SYNTHETIC_ACOU_SIM_OUTPUT_DIR = SYNTHETIC_SIMULATION_OUTPUT_DIR / "SyntheticAcouSim"
+SYNTHETIC_TR_OUTPUT_DIR = SYNTHETIC_SIMULATION_OUTPUT_DIR / "SyntheticTR"
+SYNTHETIC_RTM_OUTPUT_DIR = SYNTHETIC_SIMULATION_OUTPUT_DIR / "SyntheticRTM"

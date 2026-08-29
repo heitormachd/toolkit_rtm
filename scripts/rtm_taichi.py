@@ -12,12 +12,13 @@ from tqdm import tqdm
 import taichi as ti
 from scipy.integrate import cumulative_trapezoid as cumtrapz
 from findiff import coefficients as fdcoeffs
+from acoustics_imaging.paths import ALTERNATIVE_MODELS_DIR
 
 # Load Marmousi velocity model
 # cpnp = np.load("cp_marmousi.npy")
 c0 = 1500
 # fname = "cp_rtm.npy"
-fname = "cp_rtm_filled.npy"
+fname = ALTERNATIVE_MODELS_DIR / "cp_rtm_filled.npy"
 c2_np = np.load(fname).T[:, ::1] ** 2
 c2c_np = c0 ** 2 * np.ones_like(c2_np)
 Nx, Ny = c2_np.shape

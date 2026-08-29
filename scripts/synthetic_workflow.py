@@ -1,14 +1,15 @@
 import numpy as np
-from SyntheticAcouSim import SyntheticAcouSim
-from SyntheticTimeReversal import SyntheticTimeReversal
-from SyntheticReverseTimeMigration import SyntheticReverseTimeMigration
-from functions import convert_image_to_matrix
+from acoustics_imaging.SyntheticAcouSim import SyntheticAcouSim
+from acoustics_imaging.SyntheticTimeReversal import SyntheticTimeReversal
+from acoustics_imaging.SyntheticReverseTimeMigration import SyntheticReverseTimeMigration
+from acoustics_imaging.functions import convert_image_to_matrix
+from acoustics_imaging.paths import MODELS_DIR
 
-IMAGE_PATH = './weird-shape.png'
+IMAGE_PATH = MODELS_DIR / 'ws3s.png'
 FORCE_RECEIVERS_TO_SURFACE = False
 SURFACE_RECEIVER_Z = np.int32(1)
-FORWARD_TOTAL_TIME = np.int32(2100)
-TIME_REVERSAL_TOTAL_TIME = np.int32(3000)
+FORWARD_TOTAL_TIME = np.int32(8000)
+TIME_REVERSAL_TOTAL_TIME = np.int32(10000)
 
 c, source_z, source_x, receptor_z, receptor_x, source_ids = convert_image_to_matrix(IMAGE_PATH, return_source_ids=True)
 

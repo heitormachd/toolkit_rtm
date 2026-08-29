@@ -9,7 +9,7 @@ os.environ.setdefault('MPLCONFIGDIR', _MPLCONFIGDIR.name)
 import numpy as np
 from matplotlib.image import imsave
 
-from functions import convert_image_to_matrix
+from acoustics_imaging.functions import convert_image_to_matrix
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

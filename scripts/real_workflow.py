@@ -1,7 +1,8 @@
 import numpy as np
-from ReverseTimeMigration import ReverseTimeMigration
-from TimeReversal import TimeReversal
-from InputTest import InputTest
+from acoustics_imaging.ReverseTimeMigration import ReverseTimeMigration
+from acoustics_imaging.TimeReversal import TimeReversal
+from acoustics_imaging.InputTest import InputTest
+from acoustics_imaging.paths import ACUDE_DATA_DIR, PANTHER_DATA_DIR
 
 # 'panther' ou 'acude'
 dados = 'acude'
@@ -9,7 +10,7 @@ dados = 'acude'
 input_test = InputTest()
 
 if dados == 'acude':
-    input_test.load_data_acude(file='./acude/azulPerpendicular1_Variables.mat', resampled=True)
+    input_test.load_data_acude(file=ACUDE_DATA_DIR / 'azulPerpendicular1_Variables.mat', resampled=True)
     # input_test.plot_bscan()
     # input_test.select_bscan_interval(min_time=131500, max_time=141400)
     # input_test.resample_bscan(dt_new=np.float32(3.33e-6))
@@ -18,7 +19,7 @@ if dados == 'acude':
     # input_test.plot_ascans()
     # input_test.plot_ascan(microphone_index=100)
 elif dados == 'panther':
-    input_test.load_data_panther(file_m2k='./arquivos_m2k/teste2_perto_fio_a_esquerda.m2k')
+    input_test.load_data_panther(file_m2k=PANTHER_DATA_DIR / 'teste2_perto_fio_a_esquerda.m2k')
 
 # Grid em metros
 size_meters_z = np.float32(10)

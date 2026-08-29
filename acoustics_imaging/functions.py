@@ -4,6 +4,15 @@ from matplotlib.image import imread
 import subprocess
 from pathlib import Path
 
+from .paths import (
+    MODELS_DIR,
+    PLOTS_DIR,
+    SOURCES_DIR,
+    SYNTHETIC_ACOU_SIM_OUTPUT_DIR,
+    SYNTHETIC_RTM_OUTPUT_DIR,
+    SYNTHETIC_TR_OUTPUT_DIR,
+)
+
 
 _DAS_NEIGHBOR_OFFSETS = (
     (-1, -1), (-1, 0), (-1, 1),
@@ -12,7 +21,12 @@ _DAS_NEIGHBOR_OFFSETS = (
 )
 
 
-def temporal_spatial_plot(recording_path='./SyntheticAcouSim/microphones_recording.npy', *, cmap='seismic', percentile=99.5):
+def temporal_spatial_plot(
+    recording_path=SYNTHETIC_ACOU_SIM_OUTPUT_DIR / 'microphones_recording.npy',
+    *,
+    cmap='seismic',
+    percentile=99.5,
+):
     recording = np.load(recording_path)
     if recording.ndim != 2:
         raise ValueError(f'Expected a 2D recording array at {recording_path}, got shape {recording.shape}.')
@@ -32,22 +46,28 @@ def temporal_spatial_plot(recording_path='./SyntheticAcouSim/microphones_recordi
     return fig, ax
 
 
-def plot_accumulated_product():
+def plot_accumulated_product(
+    image_path=MODELS_DIR / 'map.png',
+    rtm_dir=SYNTHETIC_RTM_OUTPUT_DIR,
+    output_path=PLOTS_DIR / 'rtm.png',
+):
 
-    c, _, _, _, _ = convert_image_to_matrix('./map.png')
+    c, _, _, _, _ = convert_image_to_matrix(image_path)
     reflector_z, reflector_x = np.int32(np.where(c == 0))
 
-    accumulated_product_paths = sorted(Path('./SyntheticRTM').glob('accumulated_product_*.npy'))
+    accumulated_product_paths = sorted(Path(rtm_dir).glob('accumulated_product_*.npy'))
     if not accumulated_product_paths:
-        raise FileNotFoundError('No accumulated RTM images were found in ./SyntheticRTM.')
+        raise FileNotFoundError(f'No accumulated RTM images were found in {rtm_dir}.')
 
     accumulated_product = np.load(accumulated_product_paths[0])
     for accumulated_product_path in accumulated_product_paths[1:]:
         accumulated_product += np.load(accumulated_product_path)
 
-    # accumulated_product_poynting = np.load('./SyntheticRTM/accumulated_product_poynting_0.npy')
+    # accumulated_product_poynting = np.load(SYNTHETIC_RTM_OUTPUT_DIR / 'accumulated_product_poynting_0.npy')
     # for i in range(1, 8):
-    #     accumulated_product_poynting += np.load(f'./SyntheticRTM/accumulated_product_poynting_{i}.npy')
+    #     accumulated_product_poynting += np.load(
+    #         SYNTHETIC_RTM_OUTPUT_DIR / f'accumulated_product_poynting_{i}.npy'
+    #     )
 
     L = 45 
   
@@ -82,7 +102,9 @@ def plot_accumulated_product():
     # fig.colorbar(im1, ax=axs[1], orientation='vertical', shrink=0.8)
     # axs[1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='white')
 
-    plt.savefig('rtm.png')
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path)
     plt.show()
     
 def create_source(
@@ -90,7 +112,7 @@ def create_source(
     mu=30,
     sigma=5,
     samples=1000,
-    output_dir='.',
+    output_dir=SOURCES_DIR,
     legacy_alias=True,
     delay_between_sources=None,
 ):
@@ -127,7 +149,7 @@ def create_source(
     return source_paths
 
 
-def load_source(source_id=0, total_time=None, source_dir='.'):
+def load_source(source_id=0, total_time=None, source_dir=SOURCES_DIR):
     source_id = int(source_id)
     source_dir = Path(source_dir)
 
@@ -156,7 +178,7 @@ def load_source(source_id=0, total_time=None, source_dir='.'):
     return source
 
 
-def load_sources(source_ids, total_time, source_dir='.'):
+def load_sources(source_ids, total_time, source_dir=SOURCES_DIR):
     source_ids = np.atleast_1d(source_ids).astype(np.int32)
     if source_ids.size == 0:
         raise ValueError('At least one source ID is required.')
@@ -164,7 +186,7 @@ def load_sources(source_ids, total_time, source_dir='.'):
     sources = [load_source(int(source_id), total_time, source_dir) for source_id in source_ids]
     return np.ascontiguousarray(np.vstack(sources).astype(np.float32))
 
-def plot_source(source_dir='.'):
+def plot_source(source_dir=SOURCES_DIR):
     source_dir = Path(source_dir)
     source_paths = []
 
@@ -194,11 +216,14 @@ def plot_source(source_dir='.'):
 
     return fig, ax
 
-def plot_max_abs_pressure(image_path='./3sources.png'):
-    max_abs_pressure = np.load('./SyntheticTR/max_abs_pressure.npy')
+def plot_max_abs_pressure(
+    image_path=MODELS_DIR / 'map.png',
+    pressure_path=SYNTHETIC_TR_OUTPUT_DIR / 'max_abs_pressure.npy',
+):
+    max_abs_pressure = np.load(pressure_path)
     image_path = Path(image_path)
     if not image_path.exists() and image_path.name == '3sources.png':
-        image_path = Path('./map.png')
+        image_path = MODELS_DIR / 'map.png'
 
     _, source_z, source_x, _, _, _ = convert_image_to_matrix(image_path, return_source_ids=True)
 
@@ -450,7 +475,7 @@ def convert_image_to_matrix(image_path, return_source_ids=False):
 
 if __name__ == "__main__":
     # plot_accumulated_product()
-    # create_source(n_sources=3, samples=3500 , delay_between_sources=800)
+    create_source(n_sources=3, samples=7000 , delay_between_sources=2000)
     # plot_source()
-    plot_max_abs_pressure()
-    temporal_spatial_plot()
+    # plot_max_abs_pressure()
+    # temporal_spatial_plot()

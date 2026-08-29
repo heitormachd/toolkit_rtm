@@ -1,8 +1,9 @@
 import numpy as np
 import os
-from SimulationConfig import SimulationConfig
-from WebGpuHandler import WebGpuHandler
-from functions import save_image, create_video, load_sources
+from .SimulationConfig import SimulationConfig
+from .WebGpuHandler import WebGpuHandler
+from .functions import save_image, create_video, load_sources
+from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_ACOU_SIM_OUTPUT_DIR
 import matplotlib.pyplot as plt
 
 
@@ -11,9 +12,9 @@ class SyntheticAcouSim(SimulationConfig):
         super().__init__(**simulation_config)
 
         # Create folders
-        self.folder = './SyntheticAcouSim'
-        self.frames_folder = f'{self.folder}/frames'
-        os.makedirs(self.frames_folder, exist_ok=True)
+        self.folder = SYNTHETIC_ACOU_SIM_OUTPUT_DIR
+        self.frames_folder = self.folder / 'frames'
+        self.frames_folder.mkdir(parents=True, exist_ok=True)
 
         self.microphone_z = simulation_config['microphone_z']
         self.microphone_x = simulation_config['microphone_x']
@@ -34,7 +35,7 @@ class SyntheticAcouSim(SimulationConfig):
         self.microphones_recording = np.array([[0 for _ in range(self.total_time)] for _ in range(self.microphones_amount)], dtype=np.float32)
 
         # Source
-        self.source = load_sources(self.source_ids, self.total_time)
+        self.source = load_sources(self.source_ids, self.total_time, source_dir=SOURCES_DIR)
         self.source_time = np.int32(self.source.shape[1])
         self.source_zx = np.ascontiguousarray(np.concatenate((self.source_z, self.source_x)).astype(np.int32))
 
@@ -64,7 +65,7 @@ class SyntheticAcouSim(SimulationConfig):
         self.setup_gpu()
 
     def setup_gpu(self):
-        self.wgpu_handler = WebGpuHandler(shader_file='./synthetic_acou_sim.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
+        self.wgpu_handler = WebGpuHandler(shader_file=SHADERS_DIR / 'synthetic_acou_sim.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
 
         self.wgpu_handler.create_shader_module()
 
@@ -155,7 +156,7 @@ class SyntheticAcouSim(SimulationConfig):
                 plt.scatter(self.reflector_x, self.reflector_z, s=0.05, color='green')
                 plt.grid(True)
                 plt.title(f'Synthetic Acoustic Sim - {self.sources_amount} sources - {i}')
-                plt.savefig(f'{self.frames_folder}/frame_{i // animation_step}.png')
+                plt.savefig(self.frames_folder / f'frame_{i // animation_step}.png')
                 plt.close()
 
             if i % 300 == 0:
@@ -163,7 +164,7 @@ class SyntheticAcouSim(SimulationConfig):
 
         print('Synthetic Acoustic Simulation finished.')
 
-        np.save(f'{self.folder}/microphones_recording.npy', self.microphones_recording)
+        np.save(self.folder / 'microphones_recording.npy', self.microphones_recording)
 
         if generate_video:
-            create_video(path=self.frames_folder, output_path=f'{self.folder}/acou_sim.mp4')
+            create_video(path=self.frames_folder, output_path=self.folder / 'acou_sim.mp4')

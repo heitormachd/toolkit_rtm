@@ -5,7 +5,8 @@ from framework import file_m2k as m2k_handler
 from framework.data_types import DataInsp
 import matplotlib.colors as colors
 from scipy.interpolate import interp1d
-from signal_processing_functions import *
+from .paths import ACUDE_DATA_DIR
+from .signal_processing_functions import *
 
 color = list(colors.TABLEAU_COLORS.values())
 
@@ -31,8 +32,8 @@ class InputTest:
         data_acude = loadmat(file)
 
         if resampled:
-            self.bscan = np.load('./acude/bscan_resampled.npy')
-            self.time = np.load('./acude/time_resampled.npy')
+            self.bscan = np.load(ACUDE_DATA_DIR / 'bscan_resampled.npy')
+            self.time = np.load(ACUDE_DATA_DIR / 'time_resampled.npy')
             self.dt = np.float32(self.time[1] - self.time[0])
         else:
             self.bscan = data_acude['data'].transpose().astype(np.float32)
@@ -108,8 +109,9 @@ class InputTest:
         interpolate_f = interp1d(self.time[self.min:self.max], self.bscan[:, :], kind='cubic', fill_value="extrapolate")
         self.bscan = np.float32(interpolate_f(time_new))
 
-        np.save('./acude/bscan_resampled.npy', self.bscan)
-        np.save('./acude/time_resampled.npy', time_new)
+        ACUDE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        np.save(ACUDE_DATA_DIR / 'bscan_resampled.npy', self.bscan)
+        np.save(ACUDE_DATA_DIR / 'time_resampled.npy', time_new)
 
     def plot_ascan(self, microphone_index: int):
         plt.figure()

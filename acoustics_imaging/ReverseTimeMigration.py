@@ -1,49 +1,42 @@
 import os
 import numpy as np
-from SimulationConfig import SimulationConfig
-from WebGpuHandler import WebGpuHandler
-from functions import save_rtm_image, create_video, load_sources
-import matplotlib.pyplot as plt
+from .InputTest import InputTest
+from .SimulationConfig import SimulationConfig
+from .WebGpuHandler import WebGpuHandler
+from .functions import save_rtm_image, create_video
+from .paths import REAL_RTM_OUTPUT_DIR, REAL_TIME_REVERSAL_OUTPUT_DIR, SHADERS_DIR, SOURCES_DIR
 
 
-class SyntheticReverseTimeMigration(SimulationConfig):
+class ReverseTimeMigration(SimulationConfig):
     def __init__(self, **simulation_config):
         super().__init__(**simulation_config)
 
-        self.reflector_z, self.reflector_x = np.int32(np.where(self.c == 0))
-        self.reflectors_amount = np.int32(len(self.reflector_z))
-
-        self.c = self.c.copy()
-
-        self.c[self.c == np.float32(0)] = simulation_config['medium_c']
-
-        self.emitter_index = int(simulation_config.get('emitter_index', 0))
-
         # Create folders
-        self.folder = './SyntheticRTM'
-        self.frames_folder = f'{self.folder}/frames'
-        os.makedirs(self.frames_folder, exist_ok=True)
-        self.tr_folder = './SyntheticTR'
+        self.folder = REAL_RTM_OUTPUT_DIR
+        self.frames_folder = self.folder / 'frames'
+        self.frames_folder.mkdir(parents=True, exist_ok=True)
+        self.tr_folder = REAL_TIME_REVERSAL_OUTPUT_DIR
+
+        input_test: InputTest = simulation_config['input_test']
+        self.emitter_index = input_test.fmc_emitter
+        self.total_time = input_test.total_time
+        print(f'Total time: {self.total_time}')
 
         # Source
-        self.source_ids = np.atleast_1d(
-            simulation_config.get('source_ids', simulation_config.get('source_id', 0))
-        ).astype(np.int32)
-        self.source = load_sources(self.source_ids, self.total_time)
-        self.source_time = np.int32(self.source.shape[1])
+        self.source = np.load(SOURCES_DIR / 'source.npy').astype(np.float32)
+        if len(self.source) < self.total_time:
+            self.source = np.pad(self.source, (0, self.total_time - len(self.source)), 'constant').astype(np.float32)
+        elif len(self.source) > self.total_time:
+            self.source = self.source[:self.total_time]
 
         # Source's position
-        self.source_z = np.atleast_1d(simulation_config['source_z']).astype(np.int32)
-        self.source_x = np.atleast_1d(simulation_config['source_x']).astype(np.int32)
-        self.sources_amount = np.int32(len(self.source_z))
-        if len(self.source_x) != self.sources_amount or len(self.source_ids) != self.sources_amount:
-            raise ValueError('source_z, source_x, and source_ids must have the same length.')
-        self.source_zx = np.ascontiguousarray(np.concatenate((self.source_z, self.source_x)).astype(np.int32))
+        self.source_z = np.int32(np.load(self.tr_folder / 'emitter_z.npy'))
+        self.source_x = np.int32(np.load(self.tr_folder / 'emitter_x.npy'))
 
         # Up-going pressure fields (Flipped Time Reversal)
         self.p_future_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
-        self.p_present_flipped_tr = np.load(f'{self.tr_folder}/second_to_last_frame.npy')
-        self.p_past_flipped_tr = np.load(f'{self.tr_folder}/last_frame.npy')
+        self.p_present_flipped_tr = np.load(self.tr_folder / 'second_to_last_frame.npy')
+        self.p_past_flipped_tr = np.load(self.tr_folder / 'last_frame.npy')
 
         # Partial derivatives (Flipped Time Reversal)
         self.dp_1_z_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
@@ -61,21 +54,13 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         self.is_z_absorption_int_flipped_tr = self.is_z_absorption_int.copy()
         self.is_x_absorption_int_flipped_tr = self.is_x_absorption_int.copy()
 
-        self.v_z_present = np.zeros(self.grid_size_shape, dtype=np.float32)
-        self.v_x_present = np.zeros(self.grid_size_shape, dtype=np.float32)
-
-        self.v_z_present_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
-        self.v_x_present_flipped_tr = np.zeros(self.grid_size_shape, dtype=np.float32)
-
-        self.rtm_poynting_image = np.zeros(self.grid_size_shape, dtype=np.float32)
-
         # WebGPU buffer
         self.info_i32 = np.array(
             [
                 self.grid_size_z,
                 self.grid_size_x,
-                self.sources_amount,
-                self.source_time,
+                self.source_z,
+                self.source_x,
                 0,
             ],
             dtype=np.int32
@@ -95,7 +80,7 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         self.setup_gpu()
 
     def setup_gpu(self):
-        self.wgpu_handler = WebGpuHandler(shader_file='./reverse_time_migration.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
+        self.wgpu_handler = WebGpuHandler(shader_file=SHADERS_DIR / 'reverse_time_migration.wgsl', wsz=self.grid_size_z, wsx=self.grid_size_x)
 
         self.wgpu_handler.create_shader_module()
 
@@ -135,32 +120,18 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             'absorption_x_flipped_tr': self.absorption_x_flipped_tr,
             'is_z_absorption_flipped_tr': self.is_z_absorption_int_flipped_tr,
             'is_x_absorption_flipped_tr': self.is_x_absorption_int_flipped_tr,
-            'v_z_present': self.v_z_present,
-            'v_x_present': self.v_x_present,
-            'v_z_present_flipped_tr': self.v_z_present_flipped_tr,
-            'v_x_present_flipped_tr': self.v_x_present_flipped_tr,
-            'rtm_poynting_image': self.rtm_poynting_image,
-            'source_zx': self.source_zx,
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
 
     def run(self, generate_video: bool, animation_step: int):
-        if generate_video:
-            for frame_name in os.listdir(self.frames_folder):
-                if frame_name.startswith('frame_') and frame_name.endswith('.png'):
-                    os.remove(os.path.join(self.frames_folder, frame_name))
-
         compute_forward_diff = self.wgpu_handler.create_compute_pipeline("forward_diff")
         compute_after_forward = self.wgpu_handler.create_compute_pipeline("after_forward")
         compute_backward_diff = self.wgpu_handler.create_compute_pipeline("backward_diff")
         compute_after_backward = self.wgpu_handler.create_compute_pipeline("after_backward")
         compute_sim_flipped_tr = self.wgpu_handler.create_compute_pipeline("sim_flipped_tr")
         compute_sim = self.wgpu_handler.create_compute_pipeline("sim")
-        compute_update_velocity = self.wgpu_handler.create_compute_pipeline("update_velocity")
-        compute_update_rtm_image = self.wgpu_handler.create_compute_pipeline("update_rtm_image")
         compute_incr_time = self.wgpu_handler.create_compute_pipeline("incr_time")
-
 
         accumulated_product = np.zeros(self.grid_size_shape, dtype=np.float32)
 
@@ -178,11 +149,7 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             compute_pass.set_pipeline(compute_after_forward)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
-            
-            compute_pass.set_pipeline(compute_update_velocity)
-            compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
-                                             self.grid_size_x // self.wgpu_handler.ws[1])
-            
+
             compute_pass.set_pipeline(compute_backward_diff)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
@@ -198,11 +165,7 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             compute_pass.set_pipeline(compute_sim)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
-            
-            compute_pass.set_pipeline(compute_update_rtm_image)
-            compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
-                                             self.grid_size_x // self.wgpu_handler.ws[1])
-            
+
             compute_pass.set_pipeline(compute_incr_time)
             compute_pass.dispatch_workgroups(1)
 
@@ -214,49 +177,18 @@ class SyntheticReverseTimeMigration(SimulationConfig):
                              .reshape(self.grid_size_shape))
             self.p_future_flipped_tr = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b19']).cast("f"))
                              .reshape(self.grid_size_shape))
-            accumulated_product_poynting = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b38']).cast("f"))
-                                 .reshape(self.grid_size_shape))
-            
+
             current_product = self.p_future * self.p_future_flipped_tr
             accumulated_product += current_product
 
-            L = self.absorption_layer_size
-            roi_slice = (slice(None, -L), slice(L, -L))
-
-            in_roi = (self.reflector_x >= L) & (self.reflector_x < (self.grid_size_x - L)) & \
-                         (self.reflector_z < (self.grid_size_z - L))
-            
-            roi_reflector_x = self.reflector_x[in_roi] - L 
-            roi_reflector_z = self.reflector_z[in_roi]
-
-            
             if generate_video and i % animation_step == 0:
-                fig, axs = plt.subplots(2, 2, figsize=(10, 10))
-
-                axs[0, 0].imshow(self.p_future_flipped_tr, cmap='viridis', interpolation='none')
-                axs[0, 0].set_title('Up-Going')
-                axs[1, 0].imshow(self.p_future, cmap='viridis', interpolation='none')
-                axs[1, 0].set_title('Down-Going')
-
-                axs[0, 1].imshow(accumulated_product[roi_slice], cmap='viridis', interpolation='none')
-                axs[0, 1].set_title('Accumulated Standard Product')
-
-                axs[1, 1].imshow(current_product[roi_slice], cmap='viridis', interpolation='none')
-                axs[1, 1].set_title('Current Product')
-
-                axs[1, 1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='red')
-
-                # axs[1, 1].scatter(self.reflector_x, self.reflector_z, s=0.05, color='red')
-                plt.savefig(f'{self.frames_folder}/frame_{i // animation_step}.png', bbox_inches='tight', pad_inches=0)
-                plt.close()
-
-                # save_rtm_image(
-                #     upper_left=self.p_future_flipped_tr,
-                #     upper_right=current_product,
-                #     bottom_left=self.p_future,
-                #     bottom_right=accumulated_product,
-                #     path=f'{self.frames_folder}/frame_{i // animation_step}.png'
-                # )
+                save_rtm_image(
+                    upper_left=self.p_future_flipped_tr,
+                    upper_right=current_product,
+                    bottom_left=self.p_future,
+                    bottom_right=accumulated_product,
+                    path=self.frames_folder / f'frame_{i // animation_step}.png'
+                )
 
             if i % 300 == 0:
                 print(f'Reverse Time Migration - i={i}')
@@ -264,8 +196,7 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         print('Reverse Time Migration finished.')
 
         # Save last frame of accumulated_product
-        np.save(f'{self.folder}/accumulated_product_{self.emitter_index}.npy', accumulated_product[roi_slice])
-        np.save(f'{self.folder}/accumulated_product_poynting_{self.emitter_index}.npy', accumulated_product_poynting[roi_slice])
+        np.save(self.folder / f'accumulated_product_{self.emitter_index}.npy', accumulated_product)
 
         if generate_video:
-            create_video(path=self.frames_folder, output_path=f'{self.folder}/rtm.mp4')
+            create_video(path=self.frames_folder, output_path=self.folder / 'rtm.mp4')
