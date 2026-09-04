@@ -64,14 +64,30 @@ class ConvertImageToMatrixDASTest(unittest.TestCase):
         self.assertEqual(receptor_points, parsed_receptors)
         self.assert_contiguous_path(parsed_receptors)
 
-    def test_weird_shape_fixture_is_ordered_from_top_left_endpoint(self):
-        _, _, _, receptor_z, receptor_x = convert_image_to_matrix(
-            str(PROJECT_ROOT / 'weird-shape.png')
+    def test_map_fixture_has_expected_source_and_receiver_array(self):
+        _, source_z, source_x, receptor_z, receptor_x = convert_image_to_matrix(
+            str(PROJECT_ROOT / 'assets' / 'models' / 'map.png')
         )
 
-        self.assertEqual((527, 119), (int(receptor_z[0]), int(receptor_x[0])))
-        self.assertEqual((1144, 1081), (int(receptor_z[-1]), int(receptor_x[-1])))
-        self.assertEqual(1288, len(receptor_z))
+        self.assertEqual([(50, 350)], list(zip(source_z.astype(int), source_x.astype(int))))
+        self.assertEqual((50, 297), (int(receptor_z[0]), int(receptor_x[0])))
+        self.assertEqual((50, 402), (int(receptor_z[-1]), int(receptor_x[-1])))
+        self.assertEqual(106, len(receptor_z))
+
+        receptor_points = list(zip(receptor_z.astype(int), receptor_x.astype(int)))
+        self.assert_contiguous_path(receptor_points)
+
+    def test_poynting_benchmark_has_one_source_and_wide_receiver_array(self):
+        c, source_z, source_x, receptor_z, receptor_x = convert_image_to_matrix(
+            str(PROJECT_ROOT / 'assets' / 'models' / 'poynting_benchmark.png')
+        )
+
+        self.assertEqual([(60, 350)], list(zip(source_z.astype(int), source_x.astype(int))))
+        self.assertEqual((60, 75), (int(receptor_z[0]), int(receptor_x[0])))
+        self.assertEqual((60, 625), (int(receptor_z[-1]), int(receptor_x[-1])))
+        self.assertEqual(551, len(receptor_z))
+        self.assertTrue(np.any(c == np.float32(3200)))
+        self.assertTrue(np.any(c == np.float32(0)))
 
         receptor_points = list(zip(receptor_z.astype(int), receptor_x.astype(int)))
         self.assert_contiguous_path(receptor_points)

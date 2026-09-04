@@ -292,26 +292,65 @@ fn update_rtm_image(@builtin(global_invocation_id) index: vec3<u32>) {
     let x: i32 = i32(index.y);
     let idx = zx(z, x);
 
-    if (idx == -1) { return; }
+    // The forward differences place vz at z + 1/2 and vx at x + 1/2.
+    // Skip the first row/column so both velocities can be linearly
+    // interpolated back to the pressure node without a boundary fallback.
+    if (idx == -1 || z == 0 || x == 0) { return; }
 
-    let pd = p_present[idx];
+    let previous_z_idx = zx(z - 1, x);
+    let previous_x_idx = zx(z, x - 1);
 
-    let vdz = v_z_present[idx];
+    let vs_z = 0.5 * (v_z_present[idx] + v_z_present[previous_z_idx]);
+    let vs_x = 0.5 * (v_x_present[idx] + v_x_present[previous_x_idx]);
+    let vr_z = 0.5 * (v_z_present_flipped_tr[idx] + v_z_present_flipped_tr[previous_z_idx]);
+    let vr_x = 0.5 * (v_x_present_flipped_tr[idx] + v_x_present_flipped_tr[previous_x_idx]);
 
-    let pu = p_present_flipped_tr[idx];
+    // update_velocity advances velocity from the gradients at pressure time n.
+    // sim/sim_flipped_tr then shift pressure from n to n + 1, so averaging the
+    // two retained pressure levels collocates pressure with velocity at n + 1/2.
+    let ps = 0.5 * (p_past[idx] + p_present[idx]);
+    let pr = 0.5 * (p_past_flipped_tr[idx] + p_present_flipped_tr[idx]);
 
-    let vuz = v_z_present_flipped_tr[idx];
+    // This solver's velocity state follows the acoustic particle-velocity
+    // convention, for which p * v points along an outgoing homogeneous
+    // wavefront. The receiver field is replayed forward from the final
+    // time-reversal state, so negate its flux to recover the propagation
+    // direction used by the Yoon--Marfurt opening-angle condition.
+    let js_x = ps * vs_x;
+    let js_z = ps * vs_z;
+    let jr_x = -pr * vr_x;
+    let jr_z = -pr * vr_z;
 
-    let sdz = -pd * vdz;
-    let suz = -pu * vuz; 
+    // Scale each vector before calculating its norm. This preserves direction
+    // while preventing low-amplitude Poynting components from underflowing
+    // when they are squared.
+    let js_scale = max(abs(js_x), abs(js_z));
+    let jr_scale = max(abs(jr_x), abs(jr_z));
 
-    let pdpu = pd * pu;
+    if (js_scale > 0.0 && jr_scale > 0.0) {
+        let js_direction_x = js_x / js_scale;
+        let js_direction_z = js_z / js_scale;
+        let jr_direction_x = jr_x / jr_scale;
+        let jr_direction_z = jr_z / jr_scale;
+        let js_norm = sqrt(
+            js_direction_x * js_direction_x + js_direction_z * js_direction_z
+        );
+        let jr_norm = sqrt(
+            jr_direction_x * jr_direction_x + jr_direction_z * jr_direction_z
+        );
+        let cos_theta = clamp(
+            (
+                js_direction_x * jr_direction_x
+                + js_direction_z * jr_direction_z
+            ) / (js_norm * jr_norm),
+            -1.0,
+            1.0
+        );
 
-    var ic = 0.0;
-    if (sdz > 0.0 && suz < 0.0) {
-        ic = 1.0;
+        if (cos_theta >= -0.5) {
+            rtm_poynting_image[idx] = rtm_poynting_image[idx] + (ps * pr);
+        }
     }
-    rtm_poynting_image[idx] = rtm_poynting_image[idx] + (pdpu * ic);
 }
 
 @compute

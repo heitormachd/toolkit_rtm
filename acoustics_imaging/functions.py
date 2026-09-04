@@ -55,7 +55,11 @@ def plot_accumulated_product(
     c, _, _, _, _ = convert_image_to_matrix(image_path)
     reflector_z, reflector_x = np.int32(np.where(c == 0))
 
-    accumulated_product_paths = sorted(Path(rtm_dir).glob('accumulated_product_*.npy'))
+    accumulated_product_paths = sorted(
+        path
+        for path in Path(rtm_dir).glob('accumulated_product_*.npy')
+        if path.stem.removeprefix('accumulated_product_').isdigit()
+    )
     if not accumulated_product_paths:
         raise FileNotFoundError(f'No accumulated RTM images were found in {rtm_dir}.')
 
@@ -116,7 +120,7 @@ def create_source(
     legacy_alias=True,
     delay_between_sources=None,
 ):
-    """Create Gaussian source waveforms with independent first center and spacing."""
+    """Create zero-mean Ricker source waveforms with independent centers."""
     n_sources = int(n_sources)
     samples = int(samples)
     output_dir = Path(output_dir)
@@ -138,7 +142,11 @@ def create_source(
 
     for source_id in range(n_sources):
         center = np.float32(mu + delay_between_sources * source_id)
-        source = np.exp(-0.5 * ((x - center) / np.float32(sigma)) ** 2).astype(np.float32)
+        scaled_time = (x - center) / np.float32(sigma)
+        source = (
+            (np.float32(1.0) - scaled_time * scaled_time)
+            * np.exp(np.float32(-0.5) * scaled_time * scaled_time)
+        ).astype(np.float32)
         source_path = output_dir / f'source{source_id}.npy'
         np.save(source_path, source)
         source_paths.append(source_path)

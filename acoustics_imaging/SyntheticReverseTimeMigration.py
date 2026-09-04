@@ -7,6 +7,30 @@ from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_RTM_OUTPUT_DIR, SYNTHETIC
 import matplotlib.pyplot as plt
 
 
+SOURCE_ILLUMINATION_FLOOR_FRACTION = np.float32(1e-3)
+
+
+def _normalize_by_source_energy(
+    image,
+    source_energy,
+    illumination_floor_fraction=SOURCE_ILLUMINATION_FLOOR_FRACTION,
+):
+    normalized = np.zeros_like(image)
+    max_source_energy = np.max(source_energy)
+    if max_source_energy <= 0.0:
+        return normalized
+
+    illumination_floor = np.float32(illumination_floor_fraction * max_source_energy)
+    stabilized_source_energy = np.maximum(source_energy, illumination_floor)
+    epsilon = np.float32(np.finfo(np.float32).eps * max_source_energy)
+    np.divide(
+        image,
+        stabilized_source_energy + epsilon,
+        out=normalized,
+    )
+    return normalized
+
+
 class SyntheticReverseTimeMigration(SimulationConfig):
     def __init__(self, **simulation_config):
         super().__init__(**simulation_config)
@@ -146,7 +170,18 @@ class SyntheticReverseTimeMigration(SimulationConfig):
 
         self.wgpu_handler.create_buffers(wgsl_data)
 
-    def run(self, generate_video: bool, animation_step: int):
+    def run(
+        self,
+        generate_video: bool,
+        animation_step: int,
+        use_poynting_vectors: bool = True,
+        poynting_validation_steps=(),
+    ):
+        validation_steps = {int(step) for step in poynting_validation_steps}
+        if validation_steps and not use_poynting_vectors:
+            raise ValueError('Poynting validation steps require use_poynting_vectors=True.')
+        self.poynting_validation_snapshots = {}
+
         if generate_video:
             for frame_name in os.listdir(self.frames_folder):
                 if frame_name.startswith('frame_') and frame_name.endswith('.png'):
@@ -158,12 +193,22 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         compute_after_backward = self.wgpu_handler.create_compute_pipeline("after_backward")
         compute_sim_flipped_tr = self.wgpu_handler.create_compute_pipeline("sim_flipped_tr")
         compute_sim = self.wgpu_handler.create_compute_pipeline("sim")
-        compute_update_velocity = self.wgpu_handler.create_compute_pipeline("update_velocity")
-        compute_update_rtm_image = self.wgpu_handler.create_compute_pipeline("update_rtm_image")
+        if use_poynting_vectors:
+            compute_update_velocity = self.wgpu_handler.create_compute_pipeline("update_velocity")
+            compute_update_rtm_image = self.wgpu_handler.create_compute_pipeline("update_rtm_image")
         compute_incr_time = self.wgpu_handler.create_compute_pipeline("incr_time")
 
 
         accumulated_product = np.zeros(self.grid_size_shape, dtype=np.float32)
+        accumulated_product_poynting = (
+            np.zeros(self.grid_size_shape, dtype=np.float32)
+            if use_poynting_vectors
+            else None
+        )
+        accumulated_source_energy = np.zeros(self.grid_size_shape, dtype=np.float32)
+        previous_source_pressure = np.zeros(self.grid_size_shape, dtype=np.float32)
+        L = self.absorption_layer_size
+        roi_slice = (slice(L, -L), slice(L, -L))
 
         for i in range(self.total_time):
             command_encoder = self.wgpu_handler.device.create_command_encoder()
@@ -180,9 +225,10 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
             
-            compute_pass.set_pipeline(compute_update_velocity)
-            compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
-                                             self.grid_size_x // self.wgpu_handler.ws[1])
+            if use_poynting_vectors:
+                compute_pass.set_pipeline(compute_update_velocity)
+                compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
+                                                 self.grid_size_x // self.wgpu_handler.ws[1])
             
             compute_pass.set_pipeline(compute_backward_diff)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
@@ -200,9 +246,10 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
             
-            compute_pass.set_pipeline(compute_update_rtm_image)
-            compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
-                                             self.grid_size_x // self.wgpu_handler.ws[1])
+            if use_poynting_vectors:
+                compute_pass.set_pipeline(compute_update_rtm_image)
+                compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
+                                                 self.grid_size_x // self.wgpu_handler.ws[1])
             
             compute_pass.set_pipeline(compute_incr_time)
             compute_pass.dispatch_workgroups(1)
@@ -215,39 +262,131 @@ class SyntheticReverseTimeMigration(SimulationConfig):
                              .reshape(self.grid_size_shape))
             self.p_future_flipped_tr = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b19']).cast("f"))
                              .reshape(self.grid_size_shape))
-            accumulated_product_poynting = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b38']).cast("f"))
-                                 .reshape(self.grid_size_shape))
+            if use_poynting_vectors:
+                accumulated_product_poynting = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b38']).cast("f")
+                ).reshape(self.grid_size_shape))
+
+            if i in validation_steps:
+                source_pressure_past = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b6']).cast("f")
+                ).reshape(self.grid_size_shape))
+                receiver_pressure_past = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b21']).cast("f")
+                ).reshape(self.grid_size_shape))
+                source_vz = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b34']).cast("f")
+                ).reshape(self.grid_size_shape))
+                source_vx = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b35']).cast("f")
+                ).reshape(self.grid_size_shape))
+                receiver_vz = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b36']).cast("f")
+                ).reshape(self.grid_size_shape))
+                receiver_vx = (np.asarray(
+                    self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b37']).cast("f")
+                ).reshape(self.grid_size_shape))
+
+                source_pressure_half = np.float32(0.5) * (source_pressure_past + self.p_future)
+                receiver_pressure_half = np.float32(0.5) * (
+                    receiver_pressure_past + self.p_future_flipped_tr
+                )
+                source_jx = np.zeros(self.grid_size_shape, dtype=np.float32)
+                source_jz = np.zeros(self.grid_size_shape, dtype=np.float32)
+                receiver_jx = np.zeros(self.grid_size_shape, dtype=np.float32)
+                receiver_jz = np.zeros(self.grid_size_shape, dtype=np.float32)
+                source_jx[:, 1:] = source_pressure_half[:, 1:] * np.float32(0.5) * (
+                    source_vx[:, 1:] + source_vx[:, :-1]
+                )
+                source_jz[1:, :] = source_pressure_half[1:, :] * np.float32(0.5) * (
+                    source_vz[1:, :] + source_vz[:-1, :]
+                )
+                receiver_jx[:, 1:] = -receiver_pressure_half[:, 1:] * np.float32(0.5) * (
+                    receiver_vx[:, 1:] + receiver_vx[:, :-1]
+                )
+                receiver_jz[1:, :] = -receiver_pressure_half[1:, :] * np.float32(0.5) * (
+                    receiver_vz[1:, :] + receiver_vz[:-1, :]
+                )
+                self.poynting_validation_snapshots[i] = {
+                    'source_pressure': source_pressure_half,
+                    'source_jx': source_jx,
+                    'source_jz': source_jz,
+                    'receiver_pressure': receiver_pressure_half,
+                    'receiver_jx': receiver_jx,
+                    'receiver_jz': receiver_jz,
+                }
             
             current_product = self.p_future * self.p_future_flipped_tr
             accumulated_product += current_product
 
-            L = self.absorption_layer_size
-            roi_slice = (slice(None, -L), slice(L, -L))
+            # The shader pairs velocity at n + 1/2 with the average of pressure
+            # at n and n + 1. Reuse consecutive source-pressure readbacks to
+            # accumulate illumination at that same half-step without another
+            # GPU buffer read.
+            source_pressure_half = np.float32(0.5) * (previous_source_pressure + self.p_future)
+            accumulated_source_energy += source_pressure_half * source_pressure_half
+            previous_source_pressure = self.p_future
 
-            in_roi = (self.reflector_x >= L) & (self.reflector_x < (self.grid_size_x - L)) & \
-                         (self.reflector_z < (self.grid_size_z - L))
-            
-            roi_reflector_x = self.reflector_x[in_roi] - L 
-            roi_reflector_z = self.reflector_z[in_roi]
-
-            
             if generate_video and i % animation_step == 0:
                 fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+
+                standard_normalized_frame = _normalize_by_source_energy(
+                    accumulated_product,
+                    accumulated_source_energy,
+                )[roi_slice]
 
                 axs[0, 0].imshow(self.p_future_flipped_tr, cmap='viridis', interpolation='none')
                 axs[0, 0].set_title('Up-Going')
                 axs[1, 0].imshow(self.p_future, cmap='viridis', interpolation='none')
                 axs[1, 0].set_title('Down-Going')
 
-                axs[0, 1].imshow(accumulated_product[roi_slice], cmap='viridis', interpolation='none')
-                axs[0, 1].set_title('Accumulated Standard Product')
+                if use_poynting_vectors:
+                    poynting_normalized_frame = _normalize_by_source_energy(
+                        accumulated_product_poynting,
+                        accumulated_source_energy,
+                    )[roi_slice]
+                    display_limit = np.percentile(
+                        np.abs(np.concatenate((
+                            standard_normalized_frame.ravel(),
+                            poynting_normalized_frame.ravel(),
+                        ))),
+                        99.5,
+                    )
+                else:
+                    display_limit = np.percentile(np.abs(standard_normalized_frame), 99.5)
 
-                axs[1, 1].imshow(current_product[roi_slice], cmap='viridis', interpolation='none')
-                axs[1, 1].set_title('Current Product')
+                if display_limit == 0.0:
+                    display_limit = 1.0
 
-                axs[1, 1].scatter(roi_reflector_x, roi_reflector_z, s=0.05, color='red')
+                axs[0, 1].imshow(
+                    standard_normalized_frame,
+                    cmap='seismic',
+                    vmin=-display_limit,
+                    vmax=display_limit,
+                    interpolation='none',
+                )
+                axs[0, 1].set_title('Normalized Standard RTM')
 
-                # axs[1, 1].scatter(self.reflector_x, self.reflector_z, s=0.05, color='red')
+                if use_poynting_vectors:
+                    axs[1, 1].imshow(
+                        poynting_normalized_frame,
+                        cmap='seismic',
+                        vmin=-display_limit,
+                        vmax=display_limit,
+                        interpolation='none',
+                    )
+                    axs[1, 1].set_title('Normalized Poynting RTM')
+                else:
+                    current_limit = np.percentile(np.abs(current_product[roi_slice]), 99.5)
+                    axs[1, 1].imshow(
+                        current_product[roi_slice],
+                        cmap='seismic',
+                        vmin=-current_limit,
+                        vmax=current_limit,
+                        interpolation='none',
+                    )
+                    axs[1, 1].set_title('Current Product')
+
                 plt.savefig(self.frames_folder / f'frame_{i // animation_step}.png', bbox_inches='tight', pad_inches=0)
                 plt.close()
 
@@ -266,7 +405,48 @@ class SyntheticReverseTimeMigration(SimulationConfig):
 
         # Save last frame of accumulated_product
         np.save(self.folder / f'accumulated_product_{self.emitter_index}.npy', accumulated_product[roi_slice])
-        np.save(self.folder / f'accumulated_product_poynting_{self.emitter_index}.npy', accumulated_product_poynting[roi_slice])
+        if use_poynting_vectors:
+            np.save(
+                self.folder / f'accumulated_product_poynting_{self.emitter_index}.npy',
+                accumulated_product_poynting[roi_slice],
+            )
+
+        accumulated_product_normalized = _normalize_by_source_energy(
+            accumulated_product,
+            accumulated_source_energy,
+        )
+
+        np.save(
+            self.folder / f'accumulated_product_normalized_{self.emitter_index}.npy',
+            accumulated_product_normalized[roi_slice],
+        )
+        np.save(
+            self.folder / f'accumulated_source_energy_{self.emitter_index}.npy',
+            accumulated_source_energy[roi_slice],
+        )
+        if use_poynting_vectors:
+            accumulated_product_poynting_normalized = _normalize_by_source_energy(
+                accumulated_product_poynting,
+                accumulated_source_energy,
+            )
+            np.save(
+                self.folder / f'accumulated_product_poynting_normalized_{self.emitter_index}.npy',
+                accumulated_product_poynting_normalized[roi_slice],
+            )
+        else:
+            print('Poynting vectors disabled; Poynting output files were not updated.')
 
         if generate_video:
             create_video(path=self.frames_folder, output_path=self.folder / 'rtm.mp4')
+
+        result = {
+            'standard_raw': accumulated_product[roi_slice].copy(),
+            'source_energy': accumulated_source_energy[roi_slice].copy(),
+            'standard_normalized': accumulated_product_normalized[roi_slice].copy(),
+        }
+        if use_poynting_vectors:
+            result['poynting_raw'] = accumulated_product_poynting[roi_slice].copy()
+            result['poynting_normalized'] = (
+                accumulated_product_poynting_normalized[roi_slice].copy()
+            )
+        return result

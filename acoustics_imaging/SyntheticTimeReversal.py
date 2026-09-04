@@ -7,6 +7,27 @@ from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_ACOU_SIM_OUTPUT_DIR, SYNT
 import matplotlib.pyplot as plt
 
 
+def _apply_direct_arrival_mute(bscan, mute_samples=1000, taper_samples=100):
+    """Mute early arrivals with one cutoff per receiver and a smooth taper."""
+    mute_stops = np.asarray(mute_samples)
+    if mute_stops.ndim == 0:
+        mute_stops = np.full(bscan.shape[0], mute_stops)
+    if mute_stops.shape != (bscan.shape[0],):
+        raise ValueError('mute_samples must be a scalar or have one value per receiver.')
+
+    for receiver_index, mute_samples_for_receiver in enumerate(mute_stops):
+        mute_stop = min(max(int(mute_samples_for_receiver), 0), bscan.shape[1])
+        taper_size = min(max(int(taper_samples), 0), mute_stop)
+        zero_stop = mute_stop - taper_size
+
+        bscan[receiver_index, :zero_stop] = np.float32(0)
+        if taper_size > 0:
+            taper = np.sin(
+                np.linspace(0.0, np.pi / 2.0, taper_size, dtype=np.float32)
+            ) ** np.float32(2.0)
+            bscan[receiver_index, zero_stop:mute_stop] *= taper
+
+
 class SyntheticTimeReversal(SimulationConfig):
     def __init__(self, **simulation_config):
         super().__init__(**simulation_config)
@@ -36,7 +57,11 @@ class SyntheticTimeReversal(SimulationConfig):
         # plt.plot(self.bscan[-1, :])
         # plt.show()
 
-        self.bscan[:, :200] = np.float32(0)
+        _apply_direct_arrival_mute(
+            self.bscan,
+            mute_samples=simulation_config.get('direct_arrival_mute_samples', 1000),
+            taper_samples=simulation_config.get('direct_arrival_taper_samples', 100),
+        )
         
         # plt.figure()
         # plt.plot(self.bscan[0,:])

@@ -86,7 +86,8 @@ acoustics_imaging_pv/
 ├── docs/                                   # This document and figures
 ├── outputs/                                # Generated simulations and analysis
 ├── tests/
-└── requirements.txt
+├── pyproject.toml                          # Project metadata and dependencies
+└── uv.lock                                 # Reproducible dependency lockfile
 ```
 
 ### Class Hierarchy
@@ -106,7 +107,7 @@ All simulation classes inherit from `SimulationConfig`, which initializes the gr
 
 ![Simulator flowchart](figures/flowchart_simulator.png)
 
-> Run `python -m scripts.generate_flowchart` to regenerate the flowchart files in `docs/figures/`.
+> Run `uv run python -m scripts.generate_flowchart` to regenerate the flowchart files in `docs/figures/`.
 
 **Data transferred at each CPU / GPU boundary:**
 
@@ -240,9 +241,8 @@ Time reversal on synthetic data. Same as `TimeReversal` but:
 RTM on synthetic data with **Poynting vector imaging**. Produces two images:
 
 1. **Standard RTM**: $I(z,x) = \sum_t p_{\downarrow}(z,x,t) \cdot p_{\uparrow}(z,x,t)$
-2. **Poynting RTM**: Same product, but only where energy flux indicates a true reflection:
-   - Downgoing Poynting z-component $S_z^{\downarrow} > 0$ (energy moving down)
-   - Upgoing Poynting z-component $S_z^{\uparrow} < 0$ (energy moving up)
+2. **Poynting RTM**: Source-energy-normalized product retained by the full 2-D
+   Yoon--Marfurt opening-angle condition, with a 120-degree threshold.
 
 Includes velocity field computation for the Poynting vector calculation.
 
@@ -253,7 +253,7 @@ Utility functions for visualization and I/O.
 | Function                        | Description                                                                   |
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `convert_image_to_matrix(path)` | Parse color-coded velocity model PNG into velocity, source, receptor, and optional source-ID grids |
-| `create_source(...)`            | Generate delayed `source0.npy`...`sourceN.npy` Gaussian source waveforms       |
+| `create_source(...)`            | Generate delayed `source0.npy`...`sourceN.npy` zero-mean Ricker waveforms      |
 | `load_source(...)`              | Load, pad, or trim a selected source waveform                                  |
 | `save_image(image, path)`       | Save image with even width (video codec compatibility)                        |
 | `create_video(path, output)`    | Generate MP4 from frame sequence via ffmpeg (H.264, 25 fps)                   |
@@ -353,15 +353,15 @@ Four auxiliary fields ($\psi_z,\, \psi_x,\, \phi_z,\, \phi_x$) store the CPML me
 
 $$I(z,x) = \sum_t p_{\downarrow}(z,x,t) \cdot p_{\uparrow}(z,x,t)$$
 
-**Poynting Vector RTM** — Energy-flux-filtered crosscorrelation:
+**Poynting Vector RTM** — Full 2-D opening-angle-filtered crosscorrelation:
 
-$$S_z^{\downarrow} = -p_{\downarrow}\, v_z^{\downarrow}, \qquad S_z^{\uparrow} = -p_{\uparrow}\, v_z^{\uparrow}$$
+$$\cos\theta = \frac{\mathbf{J}_s\cdot\mathbf{J}_r}{|\mathbf{J}_s||\mathbf{J}_r|}, \qquad W=\mathbb{1}[\cos\theta\geq-0.5]$$
 
-$$I_{\text{Poynting}}(z,x) = \sum_t p_{\downarrow} \cdot p_{\uparrow} \cdot \mathbb{1}\!\left[S_z^{\downarrow} > 0 \;\wedge\; S_z^{\uparrow} < 0\right]$$
+$$I_{\text{Poynting}}(z,x) = \frac{\sum_t p_s p_r W}{\sum_t p_s^2 + \epsilon}$$
 
-The Poynting condition selects only locations where:
-- Downgoing energy flows into the medium ($S_z^{\downarrow} > 0$)
-- Upgoing energy flows out of the medium ($S_z^{\uparrow} < 0$)
+The staggered velocity components are linearly interpolated to the pressure
+node before forming both vectors. The receiver flux is negated because the
+stored time-reversal field is replayed forward during the RTM pass.
 
 This suppresses artifacts from multiples and backscattered noise.
 
@@ -376,7 +376,7 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 ### Synthetic Data Workflow (`scripts/synthetic_workflow.py`)
 
 ```
-1. Load velocity model from `assets/models/map.png` (the example script currently uses `ws3s.png`)
+1. Load velocity model from `assets/models/poynting_benchmark.png`
    └── convert_image_to_matrix() extracts velocity grid plus independent source and receptor positions
 
    PNG marker legend:
@@ -388,31 +388,34 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
    - `cyan` / `#00FFFF` = receptor only (`c = 1500`)
    - `white` / `#FFFFFF` = colocated source + receptor using source ID 0 (`c = 1500`)
 
-2. Run one combined multi-source simulation:
+2. Run sparse Full Matrix Capture (FMC). Every 16th receiver is selected as a
+   transmitter in sequence (including both array endpoints), while all
+   receivers record every shot. Set `FMC_TRANSMITTER_STRIDE = 1` for full FMC.
 
    a. Forward Simulation (SyntheticAcouSim)
-      ├── Load one waveform per source marker color
-      ├── Inject all source positions during the same GPU simulation
+      ├── Use the source marker to select the waveform
+      ├── Inject it at the current transmitter position
       ├── Record pressure at all receiver positions at each time step
       └── Save synthetic B-scan → microphones_recording.npy
 
    b. Time Reversal (SyntheticTimeReversal)
       ├── Flip B-scan in time
       ├── Replace reflector velocity (c=0) with medium velocity (1500 m/s)
-      ├── Suppress direct arrivals using the union of all source waveforms
+      ├── Suppress direct arrivals with a Tx-Rx-offset-dependent tapered mute
       ├── Back-propagate on GPU
       └── Save final frames + peak absolute pressure → last_frame.npy, second_to_last_frame.npy, max_abs_pressure.npy
 
    c. RTM Imaging (SyntheticReverseTimeMigration)
-      ├── Propagate the combined multi-source downgoing wavefield
+      ├── Propagate the current transmitter's downgoing wavefield
       ├── Load upgoing wavefield from TR frames
       ├── Accumulate standard + Poynting crosscorrelation products
-      └── Save → accumulated_product_0.npy, accumulated_product_poynting_0.npy
+      └── Return raw products and source illumination for shot stacking
 
-3. Post-processing (plot_accumulated_product)
-   ├── Sum accumulated products across all emitters
-   ├── Display standard RTM vs Poynting RTM side-by-side
-   └── Overlay ground-truth reflector positions
+3. FMC stacking
+   ├── Sum raw standard and Poynting numerators across shots
+   ├── Sum source illumination across shots
+   ├── Normalize once after stacking
+   └── Save a shared-scale comparison without reflector overlays
 ```
 
 ### Real Data Workflow (`scripts/real_workflow.py`)
@@ -507,11 +510,15 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 
 | File | Content |
 |------|---------|
-| `outputs/simulations/synthetic/SyntheticAcouSim/microphones_recording.npy` | Combined synthetic B-scan stored as receivers x time; `temporal_spatial_plot()` displays it as samples x channels |
+| `outputs/simulations/synthetic/SyntheticAcouSim/microphones_recording.npy` | B-scan for the most recently simulated FMC shot, stored as receivers x time |
 | `outputs/simulations/synthetic/SyntheticTR/last_frame.npy` | Final pressure field from time reversal |
 | `outputs/simulations/synthetic/SyntheticTR/second_to_last_frame.npy` | Penultimate pressure field from TR |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_0.npy` | Standard RTM image for the combined multi-source simulation |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_poynting_0.npy` | Poynting RTM image for the combined multi-source simulation |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_fmc.npy` | Raw standard RTM numerator summed across FMC shots |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_poynting_fmc.npy` | Raw Poynting RTM numerator summed across FMC shots |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_source_energy_fmc.npy` | Source illumination summed across FMC shots |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_normalized_fmc.npy` | Illumination-normalized standard FMC image |
+| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_poynting_normalized_fmc.npy` | Illumination-normalized Poynting FMC image |
+| `outputs/simulations/synthetic/SyntheticRTM/fmc_comparison.png` | Shared-scale standard/Poynting FMC comparison |
 | `outputs/simulations/synthetic/SyntheticTR/max_abs_pressure.npy` | Peak absolute pressure from synthetic time reversal |
 | `*/frames/*.png` | Animation frames (sequential) |
 | `*/*.mp4` | Simulation videos (H.264, 25 fps) |
@@ -522,7 +529,7 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 
 ### Python Packages
 
-From `requirements.txt`:
+Managed by `uv` from `pyproject.toml` and reproducibly pinned in `uv.lock`:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
@@ -543,7 +550,7 @@ From `requirements.txt`:
 ### Installation
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 Ensure `ffmpeg` is available on PATH for video generation.
@@ -555,11 +562,15 @@ Ensure `ffmpeg` is available on PATH for video generation.
 ### Running the Synthetic Workflow
 
 ```bash
-python -m scripts.synthetic_workflow
+uv run python -m scripts.synthetic_workflow
 ```
 
+Set `ENABLE_POYNTING_VECTORS` in `scripts/synthetic_workflow.py` to enable or
+disable the Poynting-specific velocity and imaging kernels. Conventional RTM
+outputs are generated in either mode.
+
 Requires:
-- A color-coded model in `assets/models/` (the example uses `ws3s.png`)
+- A color-coded model in `assets/models/` (the example uses `map.png`)
 - `source0.npy`...`source99.npy` in `assets/sources/` as needed by source colors. `source.npy` is accepted as a compatibility alias for source ID 0.
 
 Produces output in `outputs/simulations/synthetic/`.
@@ -567,7 +578,7 @@ Produces output in `outputs/simulations/synthetic/`.
 ### Running the Real Data Workflow
 
 ```bash
-python -m scripts.real_workflow
+uv run python -m scripts.real_workflow
 ```
 
 Requires:
@@ -579,7 +590,7 @@ Edit `scripts/real_workflow.py` to select dataset (`'acude'` or `'panther'`) and
 ### Plotting Results
 
 ```bash
-python -m scripts.plot_results
+uv run python -m scripts.plot_results
 ```
 
 Loads accumulated RTM products from all emitters, sums them, and displays standard vs Poynting RTM comparison with ground-truth reflector overlay.
@@ -587,7 +598,7 @@ Loads accumulated RTM products from all emitters, sums them, and displays standa
 The coherent-sum analysis can be run with:
 
 ```bash
-python -m scripts.coherent_sum
+uv run python -m scripts.coherent_sum
 ```
 
 Its intermediate arrays and plots are stored in `outputs/analysis/coherent_sum/`.

@@ -171,5 +171,6 @@ cython_debug/
 /outputs/
 
 # Keep the tracked example inputs visible after organizing the repository.
-!assets/models/map.png
+!assets/models/*
+!assets/models/*
 !assets/sources/source.npy

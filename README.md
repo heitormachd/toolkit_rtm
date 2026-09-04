@@ -17,17 +17,27 @@ For the full architecture, data formats, and workflow details, see [`docs/DOCUME
 
 ## Quick start
 
+With [uv](https://docs.astral.sh/uv/) installed:
+
 ```bash
-pip install -r requirements.txt
-python -m scripts.synthetic_workflow
+uv sync
+uv run python -m scripts.synthetic_workflow
 ```
+
+Set `ENABLE_POYNTING_VECTORS = False` in `scripts/synthetic_workflow.py` to run
+only conventional RTM.
+
+The synthetic workflow uses sparse full matrix capture by default: every 16th
+receiver transmits once and every receiver records each shot. Set
+`ENABLE_SPARSE_FMC = False` for the original bitmap-source single shot, or set
+`FMC_TRANSMITTER_STRIDE = 1` for full (non-sparse) capture.
 
 The real-data workflow and plotting utilities are also available as modules:
 
 ```bash
-python -m scripts.real_workflow
-python -m scripts.plot_results
-python -m scripts.coherent_sum
+uv run python -m scripts.real_workflow
+uv run python -m scripts.plot_results
+uv run python -m scripts.coherent_sum
 ```
 
 Generated files are kept under `outputs/`, so the project root stays focused on code and configuration.

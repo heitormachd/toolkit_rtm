@@ -1,0 +1,32 @@
+[project]
+name = "toolkit-rtm"
+version = "0.1.0"
+description = "GPU-accelerated acoustic and seismic imaging with WebGPU"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "cffi==1.17.1",
+    "contourpy==1.3.0",
+    "cycler==0.12.1",
+    "ffmpeg-python==0.2.0",
+    "fonttools==4.53.1",
+    "future==1.0.0",
+    "kiwisolver==1.4.7",
+    "matplotlib==3.9.2",
+    "mini-auspex==1.5.8",
+    "numpy==2.1.1",
+    "packaging==24.1",
+    "pillow==10.4.0",
+    "pycparser==2.22",
+    "pyparsing==3.1.4",
+    "pyqt5==5.15.11",
+    "pyqt5-qt5==5.15.15",
+    "pyqt5-sip==12.15.0",
+    "python-dateutil==2.9.0.post0",
+    "scipy==1.14.1",
+    "six==1.16.0",
+    "wgpu==0.18.1",
+]
+
+[tool.uv]
+package = false
