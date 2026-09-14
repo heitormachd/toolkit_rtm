@@ -47,7 +47,7 @@ class InputTest:
         self.microphones_distance = np.float32(data_acude['dstep'].item())
 
     def load_data_panther(self, file_m2k: str):
-        data_panther: DataInsp = m2k_handler.read(file_m2k, freq_transd=5, bw_transd=0.5, tp_transd='gaussian', sel_shots=0)
+        data_panther: DataInsp = m2k_handler.read(str(file_m2k), freq_transd=5, bw_transd=0.5, tp_transd='gaussian', sel_shots=0)
 
         self.bscan_fmc = data_panther.ascan_data[:, :, :, 0].astype(np.float32)
         self.total_time = np.int32(len(self.bscan_fmc[:, 0, 0]))
@@ -55,13 +55,14 @@ class InputTest:
         self.microphones_distance = np.float32(data_panther.probe_params.pitch * 1e-3)
         self.microphones_amount = np.int32(data_panther.probe_params.num_elem)
         self.gate_start = np.float32(data_panther.inspection_params.gate_start)
+        return data_panther
 
     def select_fmc_emitter(self, microphone_index):
         self.fmc_emitter = np.int32(microphone_index)
 
         self.bscan = self.bscan_fmc[:, microphone_index, :].transpose().astype(np.float32)
 
-        padding_zeros = np.int32(self.gate_start / (self.dt * 1e6))
+        padding_zeros = int(round(float(self.gate_start) / (float(self.dt) * 1e6)))
         padding_zeros = np.zeros((self.microphones_amount, padding_zeros))
 
         self.bscan = np.hstack((padding_zeros, self.bscan), dtype=np.float32)

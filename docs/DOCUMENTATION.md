@@ -145,10 +145,10 @@ SyntheticAcouSim ──► microphones_recording.npy (synthetic B-scan)
 InputTest ──► bscan (preprocessed)
     │
     ▼
-TimeReversal ──► last_frame.npy, second_to_last_frame.npy
-    │                      │
-    │                      ▼
-    └──────► ReverseTimeMigration ──► accumulated_product.npy
+ReverseTimeMigration
+    ├── Forward source propagation ──► pressure checkpoints in RAM
+    └── Backward receiver propagation + checkpoints
+                                      └──► accumulated_product_{i}.npy
 ```
 
 ---
@@ -210,17 +210,31 @@ Loads and preprocesses recorded acoustic data.
 
 Time reversal simulation for real recorded data. Flips the B-scan in time and back-propagates it through the velocity model by injecting the reversed signals at microphone positions.
 
-**Output:** Final pressure frames for RTM input, L2-norm energy distribution.
+**Output:** Final pressure frames and L2-norm energy distribution. An optional
+wavefield callback supplies each pressure frame to real-data RTM.
 
 ### `acoustics_imaging/ReverseTimeMigration.py`
 
-RTM imaging for real data. Propagates two wavefields simultaneously:
-- Downgoing: source-driven forward propagation
-- Upgoing: loaded from TimeReversal output (backward in time)
+RTM imaging for real data uses two passes through the `TimeReversal` solver:
+- Forward source propagation, retaining pressure at imaging times in RAM.
+- Backward propagation of the measured B-scan, correlated with source pressure
+  at the corresponding forward time.
 
-Accumulates the crosscorrelation product at each time step.
+It does not reconstruct the receiver field from the final two TR frames: PML
+absorption makes those frames insufficient. `imaging_stride` controls checkpoint
+and correlation spacing; wave propagation still uses every time step.
 
-**Output:** `accumulated_product.npy` — the RTM image.
+**Output:** `accumulated_product_{i}.npy` — the signed RTM image for emitter `i`.
+
+The real workflow enables a Standard/Poynting comparison by default. Poynting
+uses the same 120° cutoff and source-energy normalization as the synthetic
+workflow, with half-step pressure and spatially collocated particle velocity.
+Receiver flux is not negated here because the measurements already propagate
+in reverse time. Pressure checkpoints use float32 and unit-direction checkpoints
+use float16. `fmc_comparison.png` shares one amplitude scale across both images.
+`--generate-video --animation-step 1500` also saves TR and RTM frames/videos;
+without that option their frames folders stay empty. Frames show the last
+processed transmitter; FMC arrays and the comparison sum every selected one.
 
 ### `acoustics_imaging/SyntheticAcouSim.py`
 
@@ -426,24 +440,23 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
    └── 'panther': load .m2k file via InputTest.load_data_panther()
 
 2. Preprocess B-scan
-   └── process_bscan(): normalize → FFT → low-pass filter (180 Hz) → IFFT
+   ├── Acude: normalize → FFT → low-pass filter (180 Hz) → IFFT
+   └── Panther: 2–6 MHz bandpass → resample if needed → direct-arrival mute
 
-3. Set up uniform velocity model (c = 1500 m/s)
+3. Set up velocity model
+   ├── Acude: uniform 1500 m/s
+   ├── Immersion: fitted tilted water/steel interface (1483 / 5940 m/s)
+   └── Meia lua: direct contact, uniform 6350 m/s
 
-4. For each emitter:
+4. Acude: run TimeReversal only. For each Panther emitter:
 
-   a. Time Reversal (TimeReversal)
-      ├── Flip B-scan in time
-      ├── Back-propagate on GPU with microphone injection
-      └── Save final frames + L2-norm energy
+   a. Forward-propagate the estimated 5 MHz source and retain checkpoints
 
-   b. RTM Imaging (ReverseTimeMigration)
-      ├── Forward-propagate source signal
-      ├── Load upgoing wavefield from TR
-      ├── Accumulate crosscorrelation product
+   b. Back-propagate measured receiver signals
+      ├── Correlate with matching source checkpoints every 32 ns
       └── Save → accumulated_product_{i}.npy
 
-5. Optionally generate videos from frame sequences
+5. Save the selected-emitter sum, envelope plot, velocity model, axes and settings
 ```
 
 ---
@@ -451,6 +464,10 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 ## 6. Configuration & Parameters
 
 ### Grid Parameters
+
+The real-data values in this table describe **Acude**. Panther uses the
+acquisition-specific `PANTHER_SETTINGS` in `scripts/real_workflow.py`: immersion
+has 0.05 mm spacing / 4 ns steps; contact has 0.1 mm spacing / 8 ns steps.
 
 | Parameter | Real Data (`scripts/real_workflow.py`) | Synthetic (`scripts/synthetic_workflow.py`) |
 |-----------|--------------------|-----------------------------|
@@ -466,7 +483,8 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 
 | Source | Method |
 |--------|--------|
-| Real data | Uniform: `c = 1500 m/s` everywhere |
+| Acude | Uniform: `c = 1500 m/s` everywhere |
+| Panther | Fitted water/steel interface for immersion; uniform 6350 m/s for contact |
 | Synthetic | Color-coded PNG image (see [Data Formats](#7-data-formats)) |
 
 ### CPML Settings
@@ -573,7 +591,9 @@ Requires:
 - A color-coded model in `assets/models/` (the example uses `map.png`)
 - `source0.npy`...`source99.npy` in `assets/sources/` as needed by source colors. `source.npy` is accepted as a compatibility alias for source ID 0.
 
-Produces output in `outputs/simulations/synthetic/`.
+Produces output in `outputs/simulations/synthetic/` or, when
+`OUTPUT_SUBFOLDER_NAME` is set in the workflow, in
+`outputs/simulations/synthetic/<name>/`.
 
 ### Running the Real Data Workflow
 
@@ -581,11 +601,16 @@ Produces output in `outputs/simulations/synthetic/`.
 uv run python -m scripts.real_workflow
 ```
 
-Requires:
-- Recorded data file (`.mat` under `data/acude/`, `.m2k` under `data/panther/`)
-- `source.npy` in `assets/sources/`
+Requires recorded data (`.mat` under `data/acude/`, or the two `.m2k` acquisition
+directories under `panther_data/`). Panther generates its source in memory and
+does not overwrite `assets/sources/source.npy`.
 
 Edit `scripts/real_workflow.py` to select dataset (`'acude'` or `'panther'`) and configure grid parameters.
+Panther is the default and automatically sets `OUTPUT_SUBFOLDER_NAME` to each
+acquisition directory name, including `.m2k`. Use `--emitters 32` for one-emitter
+trials on both acquisitions, `--datasets meia_lua_fmc.m2k` to select one, and
+`--prepare-only` to check setup without running WebGPU. Omitting `--emitters`
+runs all transmitters. See the README for trial assumptions and memory use.
 
 ### Plotting Results
 

@@ -10,10 +10,18 @@ from acoustics_imaging.SyntheticReverseTimeMigration import (
 )
 from acoustics_imaging.SyntheticTimeReversal import SyntheticTimeReversal
 from acoustics_imaging.functions import convert_image_to_matrix, load_source
-from acoustics_imaging.paths import MODELS_DIR, SYNTHETIC_RTM_OUTPUT_DIR
+from acoustics_imaging.paths import MODELS_DIR, SYNTHETIC_SIMULATION_OUTPUT_DIR
 
 
 IMAGE_PATH = MODELS_DIR / 'poynting_benchmark.png'
+# Set to None or '' to use outputs/simulations/synthetic directly.
+OUTPUT_SUBFOLDER_NAME = 'poynting_good_result'
+OUTPUT_DIR = (
+    SYNTHETIC_SIMULATION_OUTPUT_DIR / OUTPUT_SUBFOLDER_NAME
+    if OUTPUT_SUBFOLDER_NAME
+    else SYNTHETIC_SIMULATION_OUTPUT_DIR
+)
+SYNTHETIC_RTM_OUTPUT_DIR = OUTPUT_DIR / 'SyntheticRTM'
 ENABLE_POYNTING_VECTORS = True
 ENABLE_SPARSE_FMC = True
 FMC_TRANSMITTER_STRIDE = 16
@@ -263,6 +271,7 @@ def main():
         'microphones_amount': np.int32(len(receiver_z)),
         'microphone_z': receiver_z,
         'microphone_x': receiver_x,
+        'output_dir': OUTPUT_DIR,
     }
 
     if ENABLE_SPARSE_FMC:

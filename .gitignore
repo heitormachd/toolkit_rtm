@@ -169,8 +169,9 @@ cython_debug/
 /panther/
 /data/
 /outputs/
+/panther_data/
 
 # Keep the tracked example inputs visible after organizing the repository.
-!assets/models/*
+!assets/models/* 
 !assets/models/*
 !assets/sources/source.npy

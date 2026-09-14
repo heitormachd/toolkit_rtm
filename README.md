@@ -40,4 +40,66 @@ uv run python -m scripts.plot_results
 uv run python -m scripts.coherent_sum
 ```
 
+Set `OUTPUT_SUBFOLDER_NAME` near the top of either workflow to keep a run in a
+named subfolder, such as `poynting_good_result`. Use `None` or `''` to use the
+generic output directory. Panther automatically uses each acquisition's complete
+directory name instead. Reusing a name overwrites files from that run.
+
+The real workflow defaults to both acquisitions in `panther_data/`. Start with
+one transmitter from each recording (all receivers are used):
+
+```bash
+uv run python -m scripts.real_workflow --emitters 32
+```
+
+Omit `--emitters` to migrate every transmitter, use `--datasets meia_lua_fmc.m2k`
+to select one acquisition, or add `--prepare-only` to check loading and model
+setup without running WebGPU. Set `dados = 'acude'` for the original açude TR.
+Outputs go to `outputs/simulations/real/<acquisition>.m2k/`, including
+`ReverseTimeMigration/rtm_fmc.png`, the signed per-emitter images and FMC sum,
+the velocity model, physical coordinate arrays, and `run_config.json`.
+
+Standard/Poynting comparison is enabled by `ENABLE_POYNTING_VECTORS = True`.
+`ReverseTimeMigration/fmc_comparison.png` shows both source-energy-normalized
+images on the same colour scale, as in `poynting_good_result`. The workflow also
+saves raw and normalized Poynting arrays and `fmc_transmitters.npy`. The 120°
+angle condition uses particle velocity collocated with pressure at half time
+steps; both comparison panels use those same pressure samples. Unit source
+directions are checkpointed as float16; pressure remains float32. Use
+`--no-poynting` for the original Standard-only full-step correlation.
+
+Frames are empty when `GENERATE_VIDEO = False` (the default). To produce both
+`TimeReversal/frames` + `tr.mp4` and `ReverseTimeMigration/frames` + `rtm.mp4`:
+
+```bash
+uv run python -m scripts.real_workflow --emitters 32 --generate-video --animation-step 1500
+```
+
+The RTM video includes the Standard/Poynting comparison. Frames and videos are
+replaced for each transmitter and therefore show the last processed emitter;
+the final FMC comparison sums all selected emitters. A label of `1 emitter`
+means one transmitter was migrated, with every receiver used.
+
+The immersion model follows the [example notebook](https://colab.research.google.com/drive/1vLUmfbmtpuQCr2o68tJ2GWtZq1v0cce_):
+it corrects the contact label and fits the tilted water/steel interface.
+It uses the first 60 µs of the 100 µs recording and mutes the strong front-wall
+echo before 40 µs to emphasize the notebook's 47–72 mm hole region (set
+`mute_before_us` to zero to retain shallower echoes);
+the contact model uses all 30 µs and the file's 6350 m/s sound speed.
+Both use a 2–6 MHz bandpass, a tapered direct-arrival mute, and an estimated
+5 MHz source pulse. Real-data RTM now correlates stored forward-source pressure
+with the recordings propagated backward, rather than replaying only two terminal
+TR frames after absorbing boundaries have discarded wavefield information.
+Correlation is sampled every 32 ns; propagation still uses every simulation time
+step. The contact ROI spans 100 mm horizontally (approximately −50 to +50 mm)
+and 100 mm in depth. Pressure/direction checkpoints temporarily need about
+32.8 GiB RAM for immersion and 8.5 GiB for contact, released between emitters.
+With `--no-poynting`, this falls to about 16.4 GiB and 4.2 GiB respectively.
+These are scalar acoustic trial reconstructions: source
+timing is uncalibrated, and shear waves, density contrast, and the contact
+specimen's outer shape are not modelled. The immersion grid has only about six
+cells per central wavelength in water; finer spacing and a smaller time step
+are needed for a spatial convergence check. Full FMC runs can take much longer
+than a single-transmitter trial.
+
 Generated files are kept under `outputs/`, so the project root stays focused on code and configuration.

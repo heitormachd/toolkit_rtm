@@ -1,9 +1,10 @@
 import os
 import numpy as np
+from pathlib import Path
 from .SimulationConfig import SimulationConfig
 from .WebGpuHandler import WebGpuHandler
 from .functions import save_rtm_image, create_video, load_sources
-from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_RTM_OUTPUT_DIR, SYNTHETIC_TR_OUTPUT_DIR
+from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_SIMULATION_OUTPUT_DIR
 import matplotlib.pyplot as plt
 
 
@@ -45,10 +46,14 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         self.emitter_index = int(simulation_config.get('emitter_index', 0))
 
         # Create folders
-        self.folder = SYNTHETIC_RTM_OUTPUT_DIR
+        output_dir = Path(simulation_config.get(
+            'output_dir',
+            SYNTHETIC_SIMULATION_OUTPUT_DIR,
+        ))
+        self.folder = output_dir / 'SyntheticRTM'
         self.frames_folder = self.folder / 'frames'
         self.frames_folder.mkdir(parents=True, exist_ok=True)
-        self.tr_folder = SYNTHETIC_TR_OUTPUT_DIR
+        self.tr_folder = output_dir / 'SyntheticTR'
 
         # Source
         self.source_ids = np.atleast_1d(

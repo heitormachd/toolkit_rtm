@@ -1,11 +1,28 @@
 import numpy as np
 import os
+from pathlib import Path
 from .InputTest import InputTest
 from .SimulationConfig import SimulationConfig
 from .WebGpuHandler import WebGpuHandler
 from .functions import save_image, create_video
-from .paths import REAL_TIME_REVERSAL_OUTPUT_DIR, SHADERS_DIR
+from .paths import REAL_SIMULATION_OUTPUT_DIR, SHADERS_DIR
 import matplotlib.pyplot as plt
+
+
+def _poynting_direction(pressure_half, velocity):
+    """Unit p*v direction, with staggered velocity collocated at pressure nodes."""
+    direction = np.zeros_like(velocity)
+    direction[0, 1:, :] = 0.5 * (velocity[0, 1:, :] + velocity[0, :-1, :])
+    direction[1, :, 1:] = 0.5 * (velocity[1, :, 1:] + velocity[1, :, :-1])
+    scale = np.maximum(np.abs(direction[0]), np.abs(direction[1]))
+    np.divide(direction, scale[None], out=direction, where=scale[None] > 0)
+    norm = np.hypot(direction[0], direction[1])
+    np.divide(direction, norm[None], out=direction, where=norm[None] > 0)
+    # Only the sign of pressure changes direction; avoid underflow in p*v.
+    direction *= np.sign(pressure_half)[None]
+    direction[:, 0, :] = 0
+    direction[:, :, 0] = 0
+    return direction
 
 
 class TimeReversal(SimulationConfig):
@@ -13,7 +30,11 @@ class TimeReversal(SimulationConfig):
         super().__init__(**simulation_config)
 
         # Create folders
-        self.folder = REAL_TIME_REVERSAL_OUTPUT_DIR
+        output_dir = Path(simulation_config.get(
+            'output_dir',
+            REAL_SIMULATION_OUTPUT_DIR,
+        ))
+        self.folder = output_dir / 'TimeReversal'
         self.frames_folder = self.folder / 'frames'
         self.frames_folder.mkdir(parents=True, exist_ok=True)
 
@@ -31,6 +52,12 @@ class TimeReversal(SimulationConfig):
         self.microphone_x = (np.int32(np.asarray(self.microphone_x))
                            + np.int32((self.grid_size_x - self.microphone_x[-1]) / 2))
         self.microphone_z = np.full(self.microphones_amount, 1, dtype=np.int32)  # Não colocar microfones no índice 0.
+        self.microphone_z = np.asarray(
+            simulation_config.get('microphone_z', self.microphone_z), dtype=np.int32
+        )
+        self.microphone_x = np.asarray(
+            simulation_config.get('microphone_x', self.microphone_x), dtype=np.int32
+        )
 
         # Save emitter's position to use as source position in Reverse Time Migration
         np.save(self.folder / 'emitter_z.npy', self.microphone_z[input_test.fmc_emitter])
@@ -85,17 +112,27 @@ class TimeReversal(SimulationConfig):
             'absorption': np.ascontiguousarray(np.concatenate((self.absorption_z.reshape(-1), self.absorption_x.reshape(-1)))),
             'is_absorption': np.ascontiguousarray(np.concatenate((self.is_z_absorption_int.reshape(-1), self.is_x_absorption_int.reshape(-1)))),
             'flipped_bscan': np.ascontiguousarray(self.flipped_bscan.reshape(-1)),
+            'velocity': np.zeros((2, *self.grid_size_shape), dtype=np.float32),
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
 
-    def run(self, generate_video: bool, animation_step: int):
+    def run(self, generate_video: bool, animation_step: int, wavefield_callback=None,
+            poynting_callback=None, poynting_stride=1, poynting_offset=0):
+        if animation_step < 1 or poynting_stride < 1:
+            raise ValueError('animation_step and poynting_stride must be positive.')
+        if generate_video:
+            for frame in self.frames_folder.glob('frame_*.png'):
+                if frame.stem.removeprefix('frame_').isdigit():
+                    frame.unlink()
         compute_forward_diff = self.wgpu_handler.create_compute_pipeline("forward_diff")
         compute_after_forward = self.wgpu_handler.create_compute_pipeline("after_forward")
         compute_backward_diff = self.wgpu_handler.create_compute_pipeline("backward_diff")
         compute_after_backward = self.wgpu_handler.create_compute_pipeline("after_backward")
         compute_sim = self.wgpu_handler.create_compute_pipeline("sim")
         compute_incr_time = self.wgpu_handler.create_compute_pipeline("incr_time")
+        if poynting_callback is not None:
+            compute_velocity = self.wgpu_handler.create_compute_pipeline('update_velocity')
 
         l2_norm = np.zeros(self.grid_size_shape, dtype=np.float32)
 
@@ -113,6 +150,11 @@ class TimeReversal(SimulationConfig):
             compute_pass.set_pipeline(compute_after_forward)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
                                              self.grid_size_x // self.wgpu_handler.ws[1])
+
+            if poynting_callback is not None:
+                compute_pass.set_pipeline(compute_velocity)
+                compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
+                                                 self.grid_size_x // self.wgpu_handler.ws[1])
 
             compute_pass.set_pipeline(compute_backward_diff)
             compute_pass.dispatch_workgroups(self.grid_size_z // self.wgpu_handler.ws[0],
@@ -133,8 +175,18 @@ class TimeReversal(SimulationConfig):
             self.wgpu_handler.device.queue.submit([command_encoder.finish()])
 
             """ READ BUFFERS """
+            previous_pressure = self.p_future
             self.p_future = (np.asarray(self.wgpu_handler.device.queue.read_buffer(self.wgpu_handler.buffers['b5']).cast("f"))
                              .reshape(self.grid_size_shape))
+
+            if wavefield_callback is not None:
+                wavefield_callback(i, self.p_future)
+
+            if poynting_callback is not None and i % poynting_stride == poynting_offset:
+                velocity = np.asarray(self.wgpu_handler.device.queue.read_buffer(
+                    self.wgpu_handler.buffers['b21']).cast('f')).reshape(2, *self.grid_size_shape)
+                pressure_half = np.float32(0.5) * (previous_pressure + self.p_future)
+                poynting_callback(i, pressure_half, _poynting_direction(pressure_half, velocity))
 
             if generate_video and i % animation_step == 0:
                 plt.figure()
@@ -155,7 +207,7 @@ class TimeReversal(SimulationConfig):
                 np.save(self.folder / 'last_frame.npy', self.p_future)
 
             if i % 300 == 0:
-                print(f'Time Reversal - i={i}')
+                print(f'Time Reversal - i={i}', flush=True)
 
         print('Time Reversal finished.')
 

@@ -54,6 +54,9 @@ var<storage,read> is_absorption: array<i32>;
 @group(0) @binding(20)
 var<storage,read> flipped_bscan: array<f32>;
 
+@group(0) @binding(21)
+var<storage,read_write> velocity: array<f32>;
+
 // 2D index to 1D index
 fn zx(z: i32, x: i32) -> i32 {
     return x + z * infoI32.grid_size_x;
@@ -65,6 +68,14 @@ fn x_field_index(index: i32) -> i32 {
 
 fn microphone_x_index(index: i32) -> i32 {
     return infoI32.microphones_amount + index;
+}
+
+@compute
+@workgroup_size(wsz, wsx)
+fn update_velocity(@builtin(global_invocation_id) index: vec3<u32>) {
+    let idx = zx(i32(index.x), i32(index.y));
+    velocity[idx] -= infoF32.dt * dp_1[idx];
+    velocity[x_field_index(idx)] -= infoF32.dt * dp_1[x_field_index(idx)];
 }
 
 @compute

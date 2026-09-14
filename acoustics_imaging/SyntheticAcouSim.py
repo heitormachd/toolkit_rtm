@@ -1,9 +1,10 @@
 import numpy as np
 import os
+from pathlib import Path
 from .SimulationConfig import SimulationConfig
 from .WebGpuHandler import WebGpuHandler
 from .functions import save_image, create_video, load_sources
-from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_ACOU_SIM_OUTPUT_DIR
+from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_SIMULATION_OUTPUT_DIR
 import matplotlib.pyplot as plt
 
 
@@ -12,7 +13,11 @@ class SyntheticAcouSim(SimulationConfig):
         super().__init__(**simulation_config)
 
         # Create folders
-        self.folder = SYNTHETIC_ACOU_SIM_OUTPUT_DIR
+        output_dir = Path(simulation_config.get(
+            'output_dir',
+            SYNTHETIC_SIMULATION_OUTPUT_DIR,
+        ))
+        self.folder = output_dir / 'SyntheticAcouSim'
         self.frames_folder = self.folder / 'frames'
         self.frames_folder.mkdir(parents=True, exist_ok=True)
 

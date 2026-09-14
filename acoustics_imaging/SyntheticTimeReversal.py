@@ -1,9 +1,10 @@
 import numpy as np
 import os
+from pathlib import Path
 from .SimulationConfig import SimulationConfig
 from .WebGpuHandler import WebGpuHandler
 from .functions import save_image, create_video, load_sources
-from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_ACOU_SIM_OUTPUT_DIR, SYNTHETIC_TR_OUTPUT_DIR
+from .paths import SHADERS_DIR, SOURCES_DIR, SYNTHETIC_SIMULATION_OUTPUT_DIR
 import matplotlib.pyplot as plt
 
 
@@ -40,10 +41,14 @@ class SyntheticTimeReversal(SimulationConfig):
         self.c[self.c == np.float32(0)] = simulation_config['medium_c']
 
         # Create folders
-        self.folder = SYNTHETIC_TR_OUTPUT_DIR
+        output_dir = Path(simulation_config.get(
+            'output_dir',
+            SYNTHETIC_SIMULATION_OUTPUT_DIR,
+        ))
+        self.folder = output_dir / 'SyntheticTR'
         self.frames_folder = self.folder / 'frames'
         self.frames_folder.mkdir(parents=True, exist_ok=True)
-        self.acou_sim_folder = SYNTHETIC_ACOU_SIM_OUTPUT_DIR
+        self.acou_sim_folder = output_dir / 'SyntheticAcouSim'
 
         self.bscan = np.load(self.acou_sim_folder / 'microphones_recording.npy')
         self.recorded_time = np.int32(self.bscan.shape[1])
@@ -139,6 +144,8 @@ class SyntheticTimeReversal(SimulationConfig):
             'absorption': np.ascontiguousarray(np.concatenate((self.absorption_z.reshape(-1), self.absorption_x.reshape(-1)))),
             'is_absorption': np.ascontiguousarray(np.concatenate((self.is_z_absorption_int.reshape(-1), self.is_x_absorption_int.reshape(-1)))),
             'flipped_bscan': np.ascontiguousarray(self.flipped_bscan.reshape(-1)),
+            # Shared shader binding; synthetic TR does not dispatch update_velocity.
+            'velocity': np.zeros(2, dtype=np.float32),
         }
 
         self.wgpu_handler.create_buffers(wgsl_data)
