@@ -91,15 +91,25 @@ Both use a 2–6 MHz bandpass, a tapered direct-arrival mute, and an estimated
 with the recordings propagated backward, rather than replaying only two terminal
 TR frames after absorbing boundaries have discarded wavefield information.
 Correlation is sampled every 32 ns; propagation still uses every simulation time
-step. The contact ROI spans 100 mm horizontally (approximately −50 to +50 mm)
+step. The immersion propagator uses eighth-order staggered spatial derivatives
+to reduce dispersion in water; contact and synthetic propagation retain second order.
+The contact ROI spans 180 mm horizontally (approximately −90 to +90 mm)
 and 100 mm in depth. Pressure/direction checkpoints temporarily need about
-32.8 GiB RAM for immersion and 8.5 GiB for contact, released between emitters.
-With `--no-poynting`, this falls to about 16.4 GiB and 4.2 GiB respectively.
+32.8 GiB RAM for immersion and 14.6 GiB for contact, released between emitters.
+With `--no-poynting`, this falls to about 16.4 GiB and 7.3 GiB respectively.
+Use `--output-root outputs/analysis/panther_trial` to preserve existing full-FMC
+results when testing a different grid or a subset of transmitters.
 These are scalar acoustic trial reconstructions: source
 timing is uncalibrated, and shear waves, density contrast, and the contact
 specimen's outer shape are not modelled. The immersion grid has only about six
-cells per central wavelength in water; finer spacing and a smaller time step
-are needed for a spatial convergence check. Full FMC runs can take much longer
+cells per central wavelength in water; the higher-order stencil reduces spatial
+dispersion but does not replace a grid/time convergence check. Full FMC runs can take much longer
 than a single-transmitter trial.
 
 Generated files are kept under `outputs/`, so the project root stays focused on code and configuration.
+
+RTM output layout: `ReverseTimeMigration/` (real) and `SyntheticRTM/`
+(synthetic) keep PNG previews and videos at the root, animation frames in
+`frames/`, and all NumPy arrays in `data/` (including per-emitter results, FMC
+stacks, source energy, and transmitter indices). When loading arrays from
+existing runs, include `data/` in the path.

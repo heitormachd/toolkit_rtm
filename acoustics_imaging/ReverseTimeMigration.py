@@ -39,6 +39,8 @@ class ReverseTimeMigration(SimulationConfig):
         self.simulation_config['total_time'] = self.total_time
         output_dir = Path(simulation_config.get('output_dir', REAL_SIMULATION_OUTPUT_DIR))
         self.folder = output_dir / 'ReverseTimeMigration'
+        self.data_folder = self.folder / 'data'
+        self.data_folder.mkdir(parents=True, exist_ok=True)
         self.frames_folder = self.folder / 'frames'
         self.frames_folder.mkdir(parents=True, exist_ok=True)
         self.tr_folder = output_dir / 'TimeReversal'
@@ -156,15 +158,15 @@ class ReverseTimeMigration(SimulationConfig):
         del directions
         if not np.all(np.isfinite(accumulated_product)):
             raise RuntimeError('RTM produced a nonfinite image; check the grid/time step and data.')
-        np.save(self.folder / f'accumulated_product_{self.emitter_index}.npy', accumulated_product)
-        np.save(self.folder / f'accumulated_source_energy_{self.emitter_index}.npy', self.source_energy)
-        np.save(self.folder / f'accumulated_product_normalized_{self.emitter_index}.npy',
+        np.save(self.data_folder / f'accumulated_product_{self.emitter_index}.npy', accumulated_product)
+        np.save(self.data_folder / f'accumulated_source_energy_{self.emitter_index}.npy', self.source_energy)
+        np.save(self.data_folder / f'accumulated_product_normalized_{self.emitter_index}.npy',
                 _normalize_by_source_energy(accumulated_product, self.source_energy))
         if use_poynting_vectors:
             if not np.all(np.isfinite(self.poynting_image)):
                 raise RuntimeError('Poynting RTM produced a nonfinite image.')
-            np.save(self.folder / f'accumulated_product_poynting_{self.emitter_index}.npy', self.poynting_image)
-            np.save(self.folder / f'accumulated_product_poynting_normalized_{self.emitter_index}.npy',
+            np.save(self.data_folder / f'accumulated_product_poynting_{self.emitter_index}.npy', self.poynting_image)
+            np.save(self.data_folder / f'accumulated_product_poynting_normalized_{self.emitter_index}.npy',
                     _normalize_by_source_energy(self.poynting_image, self.source_energy))
         if generate_video:
             create_video(path=self.frames_folder, output_path=self.folder / 'rtm.mp4')

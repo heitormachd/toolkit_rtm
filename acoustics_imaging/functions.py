@@ -474,7 +474,14 @@ def convert_image_to_matrix(image_path, return_source_ids=False):
             f'No receptors found in {image_path}. Use cyan pixels for receptor-only markers or white for colocated source/receptor markers.'
         )
 
-    receptor_z, receptor_x = _order_receptors_along_das_line(receptor_mask, image_path)
+    receptor_z, receptor_x = np.where(receptor_mask)
+    if np.all(is_white[receptor_mask]) and receptor_z.size >= 2 and np.all(receptor_z == receptor_z[0]):
+        # Separate colocated TX/RX markers represent a horizontal array.
+        # np.where already orders this row from left to right.
+        receptor_z = receptor_z.astype(np.int32)
+        receptor_x = receptor_x.astype(np.int32)
+    else:
+        receptor_z, receptor_x = _order_receptors_along_das_line(receptor_mask, image_path)
 
     if return_source_ids:
         return rgb_float, source_z, source_x, receptor_z, receptor_x, source_ids

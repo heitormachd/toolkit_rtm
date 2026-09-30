@@ -224,7 +224,7 @@ It does not reconstruct the receiver field from the final two TR frames: PML
 absorption makes those frames insufficient. `imaging_stride` controls checkpoint
 and correlation spacing; wave propagation still uses every time step.
 
-**Output:** `accumulated_product_{i}.npy` — the signed RTM image for emitter `i`.
+**Output:** `ReverseTimeMigration/data/accumulated_product_{i}.npy` — the signed RTM image for emitter `i`.
 
 The real workflow enables a Standard/Poynting comparison by default. Poynting
 uses the same 120° cutoff and source-energy normalization as the synthetic
@@ -467,7 +467,10 @@ $$v_z \;\leftarrow\; v_z - \Delta t \cdot \partial_z^{(1)} p, \qquad v_x \;\left
 
 The real-data values in this table describe **Acude**. Panther uses the
 acquisition-specific `PANTHER_SETTINGS` in `scripts/real_workflow.py`: immersion
-has 0.05 mm spacing / 4 ns steps; contact has 0.1 mm spacing / 8 ns steps.
+has 0.05 mm spacing / 4 ns steps with eighth-order staggered spatial derivatives;
+contact has 0.1 mm spacing / 8 ns steps with second-order derivatives and a
+180 mm wide, 100 mm deep ROI. Synthetic propagation retains second order.
+The time-step stability check includes the selected stencil's spectral bound.
 
 | Parameter | Real Data (`scripts/real_workflow.py`) | Synthetic (`scripts/synthetic_workflow.py`) |
 |-----------|--------------------|-----------------------------|
@@ -531,11 +534,11 @@ Automatically selected by `WebGpuHandler` to evenly divide the grid dimensions. 
 | `outputs/simulations/synthetic/SyntheticAcouSim/microphones_recording.npy` | B-scan for the most recently simulated FMC shot, stored as receivers x time |
 | `outputs/simulations/synthetic/SyntheticTR/last_frame.npy` | Final pressure field from time reversal |
 | `outputs/simulations/synthetic/SyntheticTR/second_to_last_frame.npy` | Penultimate pressure field from TR |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_fmc.npy` | Raw standard RTM numerator summed across FMC shots |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_poynting_fmc.npy` | Raw Poynting RTM numerator summed across FMC shots |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_source_energy_fmc.npy` | Source illumination summed across FMC shots |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_normalized_fmc.npy` | Illumination-normalized standard FMC image |
-| `outputs/simulations/synthetic/SyntheticRTM/accumulated_product_poynting_normalized_fmc.npy` | Illumination-normalized Poynting FMC image |
+| `outputs/simulations/synthetic/SyntheticRTM/data/accumulated_product_fmc.npy` | Raw standard RTM numerator summed across FMC shots |
+| `outputs/simulations/synthetic/SyntheticRTM/data/accumulated_product_poynting_fmc.npy` | Raw Poynting RTM numerator summed across FMC shots |
+| `outputs/simulations/synthetic/SyntheticRTM/data/accumulated_source_energy_fmc.npy` | Source illumination summed across FMC shots |
+| `outputs/simulations/synthetic/SyntheticRTM/data/accumulated_product_normalized_fmc.npy` | Illumination-normalized standard FMC image |
+| `outputs/simulations/synthetic/SyntheticRTM/data/accumulated_product_poynting_normalized_fmc.npy` | Illumination-normalized Poynting FMC image |
 | `outputs/simulations/synthetic/SyntheticRTM/fmc_comparison.png` | Shared-scale standard/Poynting FMC comparison |
 | `outputs/simulations/synthetic/SyntheticTR/max_abs_pressure.npy` | Peak absolute pressure from synthetic time reversal |
 | `*/frames/*.png` | Animation frames (sequential) |

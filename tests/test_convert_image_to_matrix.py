@@ -113,6 +113,33 @@ class ConvertImageToMatrixDASTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'connected DAS line'):
                 convert_image_to_matrix(str(image_path))
 
+    def test_td_rtm_maps_have_two_velocities_and_64_colocated_elements(self):
+        expected_x = np.arange(85, 716, 10, dtype=np.int32)
+        for name in ('t_b1', 'y_b1', 'y_b2', 'y_b3', 'y_b4'):
+            with self.subTest(model=name):
+                path = PROJECT_ROOT / 'assets' / 'models' / f'td_rtm_{name}.png'
+                c, source_z, source_x, receptor_z, receptor_x, source_ids = (
+                    convert_image_to_matrix(str(path), return_source_ids=True)
+                )
+                self.assertEqual(c.shape, (1041, 801))
+                np.testing.assert_array_equal(np.unique(c), [1500, 6400])
+                np.testing.assert_array_equal(source_x, expected_x)
+                np.testing.assert_array_equal(receptor_x, expected_x)
+                np.testing.assert_array_equal(source_z, np.ones(64, dtype=np.int32))
+                np.testing.assert_array_equal(receptor_z, source_z)
+                np.testing.assert_array_equal(source_ids, np.zeros(64, dtype=np.int32))
+
+    def test_disconnected_colocated_markers_on_different_rows_still_raise(self):
+        pixels = np.zeros((8, 10, 3), dtype=np.uint8)
+        pixels[:] = BLUE
+        pixels[1, 1] = 255
+        pixels[5, 7] = 255
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / 'disconnected_white.png'
+            imsave(path, pixels)
+            with self.assertRaisesRegex(ValueError, 'connected DAS line'):
+                convert_image_to_matrix(str(path))
+
     def test_branched_receptor_line_raises_value_error(self):
         receptor_points = [(2, 1), (2, 2), (2, 3), (1, 2)]
 

@@ -15,6 +15,22 @@ from scripts.real_workflow import prepare_emitter
 
 
 class RealWorkflowTest(unittest.TestCase):
+    def test_spatial_order_stability_limit(self):
+        data = self.make_input()
+        data.select_fmc_emitter(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            config = dict(dt=np.float32(40e-9), c=np.full((110, 110), 1500, dtype=np.float32),
+                          dz=np.float32(1e-4), dx=np.float32(1e-4), grid_size_z=110,
+                          grid_size_x=110, total_time=6, input_test=data, output_dir=tmp)
+            with patch.object(TimeReversal, 'setup_gpu'):
+                self.assertEqual(TimeReversal(**config).info_i32[-1], 2)
+                with self.assertRaisesRegex(ValueError, 'Unstable time step'):
+                    TimeReversal(**config, spatial_order=8)
+                config['dt'] = np.float32(20e-9)
+                self.assertEqual(TimeReversal(**config, spatial_order=8).info_i32[-1], 8)
+                with self.assertRaisesRegex(ValueError, 'spatial_order must'):
+                    TimeReversal(**config, spatial_order=4)
+
     def test_poynting_direction_is_collocated_and_amplitude_independent(self):
         pressure = np.ones((4, 5), dtype=np.float32)
         pressure[2, 2] = -1
@@ -136,7 +152,9 @@ class RealWorkflowTest(unittest.TestCase):
             np.testing.assert_array_equal(calls[1].flipped_bscan, data.bscan[:, ::-1])
             # Forward times 0, 2, 4 pair with reverse times 4, 2, 0.
             np.testing.assert_array_equal(result, 2 * (0 * 5 + 2 * 3 + 4 * 1))
-            np.testing.assert_array_equal(np.load(rtm.folder / 'accumulated_product_1.npy'), result)
+            np.testing.assert_array_equal(np.load(rtm.folder / 'data' / 'accumulated_product_1.npy'), result)
+
+            self.assertEqual(list(rtm.folder.glob('*.npy')), [])
 
             data.total_time = np.int32(6)  # Reverse samples must have offset 1 for stride 2.
             calls.clear()
@@ -162,7 +180,7 @@ class RealWorkflowTest(unittest.TestCase):
             np.testing.assert_array_equal(rtm.poynting_image[:, :55], result[:, :55])
             np.testing.assert_array_equal(rtm.poynting_image[:, 55:], 0)
             self.assertEqual(calls, [(False, 0), (True, 1)])
-            self.assertTrue((rtm.folder / 'accumulated_product_poynting_normalized_1.npy').exists())
+            self.assertTrue((rtm.folder / 'data' / 'accumulated_product_poynting_normalized_1.npy').exists())
 
 
 

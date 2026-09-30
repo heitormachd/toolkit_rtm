@@ -28,6 +28,13 @@ def _poynting_direction(pressure_half, velocity):
 class TimeReversal(SimulationConfig):
     def __init__(self, **simulation_config):
         super().__init__(**simulation_config)
+        self.spatial_order = int(simulation_config.get('spatial_order', 2))
+        if self.spatial_order not in (2, 8):
+            raise ValueError('spatial_order must be 2 or 8.')
+        stencil_factor = (1225/1024 + 245/3072 + 49/5120 + 5/7168
+                          if self.spatial_order == 8 else 1.0)
+        if np.max(self.c) * self.dt * np.hypot(1/self.dz, 1/self.dx) * stencil_factor >= 1:
+            raise ValueError('Unstable time step for the selected spatial stencil.')
 
         # Create folders
         output_dir = Path(simulation_config.get(
@@ -74,6 +81,7 @@ class TimeReversal(SimulationConfig):
                 self.microphones_amount,
                 0,
                 self.flipped_bscan.shape[1],
+                self.spatial_order,
             ],
             dtype=np.int32
         )

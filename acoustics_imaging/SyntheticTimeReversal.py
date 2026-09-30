@@ -106,6 +106,7 @@ class SyntheticTimeReversal(SimulationConfig):
                 self.microphones_amount,
                 0,
                 self.flipped_bscan.shape[1],
+                2,  # Preserve the synthetic workflow's second-order stencil.
             ],
             dtype=np.int32
         )

@@ -67,18 +67,20 @@ def _direct_arrival_mute_samples(
 
 
 def _save_fmc_results(standard_sum, source_energy_sum, poynting_sum, transmitters):
+    data_folder = SYNTHETIC_RTM_OUTPUT_DIR / 'data'
+    data_folder.mkdir(parents=True, exist_ok=True)
     standard_normalized = _normalize_by_source_energy(standard_sum, source_energy_sum)
 
-    np.save(SYNTHETIC_RTM_OUTPUT_DIR / 'accumulated_product_fmc.npy', standard_sum)
+    np.save(data_folder / 'accumulated_product_fmc.npy', standard_sum)
     np.save(
-        SYNTHETIC_RTM_OUTPUT_DIR / 'accumulated_source_energy_fmc.npy',
+        data_folder / 'accumulated_source_energy_fmc.npy',
         source_energy_sum,
     )
     np.save(
-        SYNTHETIC_RTM_OUTPUT_DIR / 'accumulated_product_normalized_fmc.npy',
+        data_folder / 'accumulated_product_normalized_fmc.npy',
         standard_normalized,
     )
-    np.save(SYNTHETIC_RTM_OUTPUT_DIR / 'fmc_transmitters.npy', transmitters)
+    np.save(data_folder / 'fmc_transmitters.npy', transmitters)
 
     images = [standard_normalized]
     titles = ['Normalized Standard RTM - sparse FMC']
@@ -88,11 +90,11 @@ def _save_fmc_results(standard_sum, source_energy_sum, poynting_sum, transmitter
             source_energy_sum,
         )
         np.save(
-            SYNTHETIC_RTM_OUTPUT_DIR / 'accumulated_product_poynting_fmc.npy',
+            data_folder / 'accumulated_product_poynting_fmc.npy',
             poynting_sum,
         )
         np.save(
-            SYNTHETIC_RTM_OUTPUT_DIR / 'accumulated_product_poynting_normalized_fmc.npy',
+            data_folder / 'accumulated_product_poynting_normalized_fmc.npy',
             poynting_normalized,
         )
         images.append(poynting_normalized)

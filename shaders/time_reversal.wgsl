@@ -4,6 +4,7 @@ struct InfoInt {
     microphones_amount: i32,
     i: i32,
     samples_per_microphone: i32,
+    spatial_order: i32,
 };
 
 struct InfoFloat {
@@ -78,17 +79,33 @@ fn update_velocity(@builtin(global_invocation_id) index: vec3<u32>) {
     velocity[x_field_index(idx)] -= infoF32.dt * dp_1[x_field_index(idx)];
 }
 
+// Eighth-order staggered first derivative, exact through degree eight.
+const FD8 = array<f32, 4>(1225.0/1024.0, -245.0/3072.0, 49.0/5120.0, -5.0/7168.0);
+
 @compute
 @workgroup_size(wsz, wsx)
 fn forward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
+    var coefficients = FD8;
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
     let grid_index: i32 = zx(z, x);
 
-    if (z + 1 < infoI32.grid_size_z) {
+    if (infoI32.spatial_order == 8 && z >= 3 && z + 4 < infoI32.grid_size_z) {
+        var value = 0.0;
+        for (var m = 1; m <= 4; m += 1) {
+            value += coefficients[u32(m - 1)] * (p_present[zx(z + m, x)] - p_present[zx(z - m + 1, x)]);
+        }
+        dp_1[grid_index] = value / infoF32.dz;
+    } else if (z + 1 < infoI32.grid_size_z) {
         dp_1[grid_index] = (p_present[zx(z + 1, x)] - p_present[grid_index]) / infoF32.dz;
     }
-    if (x + 1 < infoI32.grid_size_x) {
+    if (infoI32.spatial_order == 8 && x >= 3 && x + 4 < infoI32.grid_size_x) {
+        var value = 0.0;
+        for (var m = 1; m <= 4; m += 1) {
+            value += coefficients[u32(m - 1)] * (p_present[zx(z, x + m)] - p_present[zx(z, x - m + 1)]);
+        }
+        dp_1[x_field_index(grid_index)] = value / infoF32.dx;
+    } else if (x + 1 < infoI32.grid_size_x) {
         dp_1[x_field_index(grid_index)] = (p_present[zx(z, x + 1)] - p_present[grid_index]) / infoF32.dx;
     }
 }
@@ -96,15 +113,28 @@ fn forward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
 @compute
 @workgroup_size(wsz, wsx)
 fn backward_diff(@builtin(global_invocation_id) index: vec3<u32>) {
+    var coefficients = FD8;
     let z: i32 = i32(index.x);
     let x: i32 = i32(index.y);
     let grid_index: i32 = zx(z, x);
     let x_grid_index: i32 = x_field_index(grid_index);
 
-    if (z - 1 >= 0) {
+    if (infoI32.spatial_order == 8 && z >= 4 && z + 3 < infoI32.grid_size_z) {
+        var value = 0.0;
+        for (var m = 1; m <= 4; m += 1) {
+            value += coefficients[u32(m - 1)] * (dp_1[zx(z + m - 1, x)] - dp_1[zx(z - m, x)]);
+        }
+        dp_2[grid_index] = value / infoF32.dz;
+    } else if (z - 1 >= 0) {
         dp_2[grid_index] = (dp_1[grid_index] - dp_1[zx(z - 1, x)]) / infoF32.dz;
     }
-    if (x - 1 >= 0) {
+    if (infoI32.spatial_order == 8 && x >= 4 && x + 3 < infoI32.grid_size_x) {
+        var value = 0.0;
+        for (var m = 1; m <= 4; m += 1) {
+            value += coefficients[u32(m - 1)] * (dp_1[x_field_index(zx(z, x + m - 1))] - dp_1[x_field_index(zx(z, x - m))]);
+        }
+        dp_2[x_grid_index] = value / infoF32.dx;
+    } else if (x - 1 >= 0) {
         dp_2[x_grid_index] = (dp_1[x_grid_index] - dp_1[x_field_index(zx(z, x - 1))]) / infoF32.dx;
     }
 }

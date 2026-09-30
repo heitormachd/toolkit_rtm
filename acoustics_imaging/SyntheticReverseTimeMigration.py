@@ -51,6 +51,8 @@ class SyntheticReverseTimeMigration(SimulationConfig):
             SYNTHETIC_SIMULATION_OUTPUT_DIR,
         ))
         self.folder = output_dir / 'SyntheticRTM'
+        self.data_folder = self.folder / 'data'
+        self.data_folder.mkdir(parents=True, exist_ok=True)
         self.frames_folder = self.folder / 'frames'
         self.frames_folder.mkdir(parents=True, exist_ok=True)
         self.tr_folder = output_dir / 'SyntheticTR'
@@ -409,10 +411,10 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         print('Reverse Time Migration finished.')
 
         # Save last frame of accumulated_product
-        np.save(self.folder / f'accumulated_product_{self.emitter_index}.npy', accumulated_product[roi_slice])
+        np.save(self.data_folder / f'accumulated_product_{self.emitter_index}.npy', accumulated_product[roi_slice])
         if use_poynting_vectors:
             np.save(
-                self.folder / f'accumulated_product_poynting_{self.emitter_index}.npy',
+                self.data_folder / f'accumulated_product_poynting_{self.emitter_index}.npy',
                 accumulated_product_poynting[roi_slice],
             )
 
@@ -422,11 +424,11 @@ class SyntheticReverseTimeMigration(SimulationConfig):
         )
 
         np.save(
-            self.folder / f'accumulated_product_normalized_{self.emitter_index}.npy',
+            self.data_folder / f'accumulated_product_normalized_{self.emitter_index}.npy',
             accumulated_product_normalized[roi_slice],
         )
         np.save(
-            self.folder / f'accumulated_source_energy_{self.emitter_index}.npy',
+            self.data_folder / f'accumulated_source_energy_{self.emitter_index}.npy',
             accumulated_source_energy[roi_slice],
         )
         if use_poynting_vectors:
@@ -435,7 +437,7 @@ class SyntheticReverseTimeMigration(SimulationConfig):
                 accumulated_source_energy,
             )
             np.save(
-                self.folder / f'accumulated_product_poynting_normalized_{self.emitter_index}.npy',
+                self.data_folder / f'accumulated_product_poynting_normalized_{self.emitter_index}.npy',
                 accumulated_product_poynting_normalized[roi_slice],
             )
         else:

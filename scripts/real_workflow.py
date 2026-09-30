@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,11 +39,12 @@ PANTHER_SETTINGS = {
         'spacing': 0.05e-3, 'width': 64e-3, 'depth': 80e-3,
         'time_upsample': 2, 'end_time_us': 60.0, 'source_delay_us': 0.9,
         'imaging_stride': 8,
+        'spatial_order': 8,
         # The notebook's holes are at 47–72 mm; omit the strong front-wall echo.
         'mute_before_us': 40.0,
     },
     'meia_lua_fmc.m2k': {
-        'spacing': 0.1e-3, 'width': 100e-3, 'depth': 100e-3,
+        'spacing': 0.1e-3, 'width': 180e-3, 'depth': 100e-3,
         'time_upsample': 1, 'end_time_us': 30.0, 'source_delay_us': 0.5,
         'imaging_stride': 4,
     },
@@ -76,6 +78,9 @@ def prepare_panther(acquisition):
 
     dt = np.float32(input_test.dt / settings['time_upsample'])
     courant = float(c.max() * dt * np.sqrt(2) / spacing)
+    spatial_order = settings.get('spatial_order', 2)
+    if spatial_order == 8:
+        courant *= 1225/1024 + 245/3072 + 49/5120 + 5/7168
     if courant >= 1:
         raise ValueError(f'Unstable Panther grid: Courant number {courant:.3f} >= 1.')
     probe_x = data.probe_params.elem_center[:, 0] * 1e-3
@@ -88,6 +93,7 @@ def prepare_panther(acquisition):
         'microphone_z': microphone_z,
         # Correlate every 32 ns (15.625 MHz Nyquist for the 2–6 MHz product).
         'imaging_stride': settings['imaging_stride'],
+        'spatial_order': spatial_order,
     }
     metadata = {
         'acquisition': acquisition, 'inspection_type': data.inspection_params.type_insp,
@@ -99,6 +105,7 @@ def prepare_panther(acquisition):
         'coupling_speed_m_s': float(data.inspection_params.coupling_cl),
         'surface_z_equals_a_x_plus_b_m': surface, 'courant': courant,
         'bandpass_hz': [2e6, 6e6], **settings,
+        'spatial_order': spatial_order,
         'source_note': 'Nominal 5 MHz Gaussian; delay estimated from early diagonal pulses, not calibrated.',
     }
     return input_test, config, metadata, x, z
@@ -134,10 +141,11 @@ def prepare_emitter(input_test, config, settings, emitter):
 
 def run_panther(acquisition, emitters=None, prepare_only=False,
                 use_poynting_vectors=ENABLE_POYNTING_VECTORS,
-                generate_video=GENERATE_VIDEO, animation_step=ANIMATION_STEP):
+                generate_video=GENERATE_VIDEO, animation_step=ANIMATION_STEP,
+                output_root=REAL_SIMULATION_OUTPUT_DIR):
     global OUTPUT_SUBFOLDER_NAME
     OUTPUT_SUBFOLDER_NAME = acquisition
-    output_dir = REAL_SIMULATION_OUTPUT_DIR / OUTPUT_SUBFOLDER_NAME
+    output_dir = Path(output_root) / OUTPUT_SUBFOLDER_NAME
     input_test, config, metadata, x, z = prepare_panther(acquisition)
     selected = list(range(input_test.microphones_amount)) if emitters is None else list(dict.fromkeys(emitters))
     if not selected or any(i < 0 or i >= input_test.microphones_amount for i in selected):
@@ -184,11 +192,13 @@ def run_panther(acquisition, emitters=None, prepare_only=False,
         del rtm_sim
 
     folder = output_dir / 'ReverseTimeMigration'
-    np.save(folder / 'accumulated_product_fmc.npy', stacked)
-    np.save(folder / 'accumulated_source_energy_fmc.npy', energy_sum)
-    np.save(folder / 'fmc_transmitters.npy', np.asarray(selected, dtype=np.int32))
+    data_folder = folder / 'data'
+    data_folder.mkdir(parents=True, exist_ok=True)
+    np.save(data_folder / 'accumulated_product_fmc.npy', stacked)
+    np.save(data_folder / 'accumulated_source_energy_fmc.npy', energy_sum)
+    np.save(data_folder / 'fmc_transmitters.npy', np.asarray(selected, dtype=np.int32))
     standard_normalized = _normalize_by_source_energy(stacked, energy_sum)
-    np.save(folder / 'accumulated_product_normalized_fmc.npy', standard_normalized)
+    np.save(data_folder / 'accumulated_product_normalized_fmc.npy', standard_normalized)
     roi = (slice(PML_CELLS, -PML_CELLS), slice(PML_CELLS, -PML_CELLS))
     extent = [x[PML_CELLS] * 1e3, x[-PML_CELLS-1] * 1e3,
               z[-PML_CELLS-1] * 1e3, z[PML_CELLS] * 1e3]
@@ -197,18 +207,22 @@ def run_panther(acquisition, emitters=None, prepare_only=False,
     titles = ['Normalized Standard RTM']
     if use_poynting_vectors:
         poynting_normalized = _normalize_by_source_energy(poynting_sum, energy_sum)
-        np.save(folder / 'accumulated_product_poynting_fmc.npy', poynting_sum)
-        np.save(folder / 'accumulated_product_poynting_normalized_fmc.npy', poynting_normalized)
+        np.save(data_folder / 'accumulated_product_poynting_fmc.npy', poynting_sum)
+        np.save(data_folder / 'accumulated_product_poynting_normalized_fmc.npy', poynting_normalized)
         images.append(poynting_normalized[roi])
         titles.append('Normalized Poynting RTM')
-    limit = np.percentile(np.abs(np.stack(images)), 99.5) or 1.0
+    envelopes = [np.abs(hilbert(data, axis=0)) for data in images]
+    # One reference preserves amplitude differences between imaging conditions.
+    reference = max(float(data.max()) for data in envelopes) or 1.0
     fig, axes = plt.subplots(1, len(images), figsize=(6 * len(images), 7), layout='constrained')
-    for ax, data, title in zip(np.atleast_1d(axes), images, titles):
-        im = ax.imshow(data, extent=extent, cmap='seismic', vmin=-limit, vmax=limit,
+    for ax, envelope, title in zip(np.atleast_1d(axes), envelopes, titles):
+        db = 20 * np.log10(np.maximum(envelope / reference, 1e-6))
+        im = ax.imshow(db, extent=extent, cmap='inferno', vmin=-60, vmax=0,
                        interpolation='none', aspect='equal')
         ax.set(title=title, xlabel='x (mm)', ylabel='z (mm)')
     fig.suptitle(f'{acquisition}: {emitter_label}, {input_test.microphones_amount} receivers')
-    fig.colorbar(im, ax=np.atleast_1d(axes).tolist(), label='Normalized amplitude', shrink=0.8)
+    fig.colorbar(im, ax=np.atleast_1d(axes).tolist(),
+                 label='Envelope (dB relative to shared maximum)', shrink=0.8)
     fig.savefig(folder / 'fmc_comparison.png', dpi=180)
     plt.close(fig)
     envelope = np.abs(hilbert(stacked[roi], axis=0))
@@ -250,12 +264,14 @@ def main():
     parser.add_argument('--generate-video', action=argparse.BooleanOptionalAction, default=GENERATE_VIDEO,
                         help='Save TR and RTM frames/videos for the last processed emitter.')
     parser.add_argument('--animation-step', type=int, default=ANIMATION_STEP)
+    parser.add_argument('--output-root', type=Path, default=REAL_SIMULATION_OUTPUT_DIR,
+                        help='Use a separate output root to preserve earlier reconstructions.')
     args = parser.parse_args()
     if args.animation_step < 1:
         parser.error('--animation-step must be positive.')
     for acquisition in args.datasets:
         run_panther(acquisition, args.emitters, args.prepare_only, args.poynting,
-                    args.generate_video, args.animation_step)
+                    args.generate_video, args.animation_step, args.output_root)
 
 
 if __name__ == '__main__':
