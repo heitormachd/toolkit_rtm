@@ -113,3 +113,20 @@ RTM output layout: `ReverseTimeMigration/` (real) and `SyntheticRTM/`
 `frames/`, and all NumPy arrays in `data/` (including per-emitter results, FMC
 stacks, source energy, and transmitter indices). When loading arrays from
 existing runs, include `data/` in the path.
+
+To measure the 37 saved final migration cases using thesis section 2.2.4:
+
+```bash
+uv run python -m scripts.image_quality_metrics
+```
+
+Images, review sheets, full-resolution masks, and contrast/CNR/API tables go to
+`outputs/analysis/image_quality_20261005/`. Contrast and CNR are reported as
+`contrast_db = 10·log10(contrast)` and `cnr_db = 20·log10(cnr)`; JSON/CSV retain
+`contrast` and `cnr` as linear references. Images display signed amplitude on a
+linear `seismic` scale, with symmetric limits at the reflector-window 99.5th
+percentile shared across methods and boundary variants. Metrics and the API
+highlight use the envelope/power data. API uses the reflector window and
+retains the full-image value for reference. Signal/noise regions are proposed
+in `regions.json`; edit them and rerun with `--cases 8 12` to revise those cases.
+The legacy synthetic wavelength is inferred from the current source/workflow.
